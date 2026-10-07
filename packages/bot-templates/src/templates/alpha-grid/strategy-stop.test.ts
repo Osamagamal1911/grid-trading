@@ -78,6 +78,51 @@ describe("Layer 1 — exchange-side stop", () => {
     expect(exchange.callsTo("placeStopOrder").length).toBe(places);
   });
 
+  it("skips Layer 1 below exchange minimum (D42) — supervisor still guards", async () => {
+    // Fake clock FIRST (S8 pattern): mixing real-timer setup with fake-timer asserts
+    // jumps the clock backward and the throttle skips forever.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      const exchange = new MockAlphaGridExchange();
+      exchange.symbol.minCost = 60; // entries pass ($90), −40% stops ($54) do not
+      const settings = baseSettings();
+      const state: Record<string, unknown> = {};
+      await runTick(exchange, settings, state, "start");
+      exchange.fillOrder(buyIds(exchange)[0], 90);
+      const { state: s } = await runTick(exchange, settings, state);
+
+      expect(s.direction).toBe("long");
+      expect(exchange.stopOrders.length).toBe(0); // skipped, not forced
+      expect(s.stopUnplaceable).toBe(true);
+
+      // Supervisor still protects the unsupervised position.
+      exchange.markPrice = 50;
+      vi.advanceTimersByTime(3000);
+      const { control } = await runTick(exchange, settings, state);
+      expect(control.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-places Layer 1 when placeable again (restart re-reads venue info)", async () => {
+    const exchange = new MockAlphaGridExchange();
+    exchange.symbol.minCost = 60;
+    const settings = baseSettings();
+    const state: Record<string, unknown> = {};
+    await runTick(exchange, settings, state, "start");
+    exchange.fillOrder(buyIds(exchange)[0], 90);
+    await runTick(exchange, settings, state);
+    expect((state as unknown as { stopUnplaceable: boolean }).stopUnplaceable).toBe(true);
+
+    exchange.symbol.minCost = null; // venue info changes; restart re-reads it
+    await runTick(exchange, settings, state, "start");
+    const s = state as unknown as { stopUnplaceable: boolean };
+    expect(s.stopUnplaceable).toBe(false);
+    expect(exchange.stopOrders.length).toBe(1);
+  });
+
   it("Layer-1-off still protects via supervisor (useExchangeStopOrder=false)", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));

@@ -179,6 +179,37 @@ describe("direction lock + averaging + TP sync", () => {
     expect(exchange.callsTo("placeLimitOrder").length).toBeGreaterThan(placesBefore);
   });
 
+  it("nets same-tick opposite fills to flat (D44 race rule)", async () => {
+    const exchange = new MockAlphaGridExchange();
+    const settings = baseSettings();
+    const state: Record<string, unknown> = {};
+    await runTick(exchange, settings, state, "start");
+    // Wick crosses both sides between polls: buy AND sell fill before the tick.
+    exchange.fillOrder(buyIds(exchange)[0], 90);
+    exchange.fillOrder(sellIds(exchange)[0], 110);
+    const { state: s } = await runTick(exchange, settings, state);
+
+    expect(s.direction).toBe(null); // net flat, no throw, no phantom position
+    expect(s.totalQty).toBe(0);
+    expect(s.fills).toEqual([]);
+  });
+
+  it("flips on overshoot opposite fills (bounded by pre-lock resting size)", async () => {
+    const exchange = new MockAlphaGridExchange();
+    const settings = baseSettings();
+    const state: Record<string, unknown> = {};
+    await runTick(exchange, settings, state, "start");
+    exchange.fillOrder(buyIds(exchange)[0], 90);
+    const sells = sellIds(exchange);
+    exchange.fillOrder(sells[0], 110);
+    exchange.fillOrder(sells[1], 120);
+    const { state: s } = await runTick(exchange, settings, state);
+
+    expect(s.direction).toBe("short");
+    expect(s.totalQty).toBe(1); // 2 sells − 1 buy
+    expect(s.fills).toEqual([{ price: 120, quantity: 1, side: "short" }]);
+  });
+
   it("never opens the opposite side after lock (one-position invariant)", async () => {
     const { exchange, settings, state } = await longLocked();
     // Post-lock baseline: 3 initial sells + 1 TP sell placed so far.

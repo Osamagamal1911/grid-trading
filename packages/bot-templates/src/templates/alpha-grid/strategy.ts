@@ -17,7 +17,7 @@ import type { IExchange } from "@opentrader/exchanges";
 import type { BarSize, IGetLimitOrderResponse, IOpenOrder, OrderSide } from "@opentrader/types";
 import { atr, IndicatorError, latestAtrValue } from "@opentrader/indicators";
 import {
-  buildGridLevels,
+  buildViableGridLevels,
   computeAtrLevelSpacing,
   computeManualCenterPrice,
   computeManualLevelSpacing,
@@ -59,7 +59,7 @@ export interface AlphaGridTrackedOrder {
 }
 
 export interface AlphaGridRuntimeState {
-  version: 2;
+  version: 3;
   initialized: boolean;
   marketId: string;
   tickSize: number;
@@ -80,6 +80,8 @@ export interface AlphaGridRuntimeState {
   tpOrderId: string | null;
   /** Layer-1 exchange-side stop order id (S8; null when disabled/absent). */
   stopOrderId: string | null;
+  /** True while the stop is unplaceable (sub-min-notional) — warn once per transition (D42). */
+  stopUnplaceable: boolean;
   /** Last supervisor evaluation, ms epoch (D30 throttle). */
   lastSupervisorRun: number;
   noStopLossAck: boolean;
@@ -92,7 +94,7 @@ type Yielded = Promise<unknown>;
 // back in, which no static type can express. Yields are always exchange promises.
 type StratGen<T = void> = Generator<Yielded, T, any>;
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 
 function freshState(marketId: string): AlphaGridRuntimeState {
   return {
@@ -113,6 +115,7 @@ function freshState(marketId: string): AlphaGridRuntimeState {
     orders: [],
     tpOrderId: null,
     stopOrderId: null,
+    stopUnplaceable: false,
     lastSupervisorRun: 0,
     noStopLossAck: false,
     idleOutOfRange: false,
@@ -304,14 +307,36 @@ function accountExecution(
 
   if (tracked.kind === "grid") {
     const fillSide = sideToDirection(tracked.side);
-    state.fills.push({ price: delta.execPrice, quantity: delta.execQty, side: fillSide });
-    state.totalQty += delta.execQty;
-    logger.info(
-      `[AlphaGrid] Grid fill: ${tracked.side} ${delta.execQty} @ ${delta.execPrice} (position ${state.totalQty}).`,
-    );
     if (state.direction === null) {
+      state.fills.push({ price: delta.execPrice, quantity: delta.execQty, side: fillSide });
+      state.totalQty += delta.execQty;
       state.direction = fillSide;
       logger.info(`[AlphaGrid] Direction locked: ${fillSide} (first fill). Canceling opposite side.`);
+    } else if (fillSide !== state.direction) {
+      // Raced opposite fill (both sides crossed between polls, D44): net it.
+      const closeQty = Math.min(delta.execQty, state.totalQty);
+      state.totalQty -= closeQty;
+      logger.info(
+        `[AlphaGrid] Opposite grid fill netted: ${tracked.side} ${delta.execQty} @ ${delta.execPrice} closed ${closeQty} of ${state.direction} position (remaining ${state.totalQty}).`,
+      );
+      if (state.totalQty <= 0) {
+        state.totalQty = 0;
+        state.direction = null;
+        state.fills = [];
+      }
+      const excess = delta.execQty - closeQty;
+      if (excess > 0) {
+        state.fills.push({ price: delta.execPrice, quantity: excess, side: fillSide });
+        state.totalQty += excess;
+        state.direction = fillSide;
+        logger.info(`[AlphaGrid] Net flip: new ${fillSide} position ${excess}.`);
+      }
+    } else {
+      state.fills.push({ price: delta.execPrice, quantity: delta.execQty, side: fillSide });
+      state.totalQty += delta.execQty;
+      logger.info(
+        `[AlphaGrid] Grid fill: ${tracked.side} ${delta.execQty} @ ${delta.execPrice} (position ${state.totalQty}).`,
+      );
     }
   } else if (tracked.kind === "stop") {
     // Exchange-side stop executed: the exchange closed (part of) the position.
@@ -363,7 +388,38 @@ function armedSides(settings: AlphaGridSettings, direction: AlphaGridSide | null
   return ["buy", "sell"];
 }
 
-/** Draw missing grid levels (fresh grid or holes from external cancels). */
+/**
+ * Place grid levels for one side, skipping sub-min-notional dust (D43).
+ * Returns the count placed this call; warns on skips (one line per call, no spam).
+ */
+function* placeLevelOrders(
+  exchange: IExchange,
+  marketId: string,
+  settings: AlphaGridSettings,
+  state: AlphaGridRuntimeState,
+  side: OrderSide,
+  prices: number[],
+): StratGen<number> {
+  const quantity = roundQuantityToStep(settings.volumePerLevel, state.stepSize);
+  if (quantity <= 0) {
+    throw new Error(`alphaGrid: volumePerLevel ${settings.volumePerLevel} rounds to 0 at step ${state.stepSize}.`);
+  }
+  let placed = 0;
+  let skipped = 0;
+  for (const price of prices) {
+    if (state.minCost !== null && quantity * price < state.minCost) {
+      skipped += 1;
+      continue;
+    }
+    const order = yield exchange.placeLimitOrder({ symbol: marketId, side, quantity, price });
+    state.orders.push({ orderId: order.orderId, kind: "grid", side, price, quantity, filledSoFar: 0, filledValueSoFar: 0 });
+    placed += 1;
+  }
+  if (skipped > 0) {
+    logger.warn(`[AlphaGrid] Skipped ${skipped} sub-min-notional ${side} level(s); placed ${placed}.`);
+  }
+  return placed;
+}
 function* drawGrid(
   exchange: IExchange,
   marketId: string,
@@ -383,7 +439,7 @@ function* drawGrid(
   }
   if (!layout) return false;
 
-  const levels = buildGridLevels(layout.center, layout.spacing, settings.nLevels, state.tickSize);
+  const levels = buildViableGridLevels(layout.center, layout.spacing, settings.nLevels, state.tickSize);
   state.centerPrice = layout.center;
   state.levelSpacing = layout.spacing;
   state.gridTop = levels.gridTop;
@@ -392,21 +448,15 @@ function* drawGrid(
   const trackedPrices = new Set(state.orders.filter((o) => o.kind === "grid").map((o) => `${o.side}@${o.price}`));
   const sides = armedSides(settings, state.direction);
   for (const side of sides) {
-    const prices = side === "buy" ? levels.buyLevels : levels.sellLevels;
-    for (const price of prices) {
-      if (trackedPrices.has(`${side}@${price}`)) continue;
-      const quantity = roundQuantityToStep(settings.volumePerLevel, state.stepSize);
-      if (quantity <= 0) {
-        throw new Error(`alphaGrid: volumePerLevel ${settings.volumePerLevel} rounds to 0 at step ${state.stepSize}.`);
-      }
-      if (state.minCost !== null && quantity * price < state.minCost) {
-        throw new Error(
-          `alphaGrid: level notional ${quantity * price} below exchange minimum ${state.minCost} — raise volumePerLevel.`,
-        );
-      }
-      const placed = yield exchange.placeLimitOrder({ symbol: marketId, side, quantity, price });
-      state.orders.push({ orderId: placed.orderId, kind: "grid", side, price, quantity, filledSoFar: 0, filledValueSoFar: 0 });
-    }
+    const prices = (side === "buy" ? levels.buyLevels : levels.sellLevels).filter(
+      (price) => !trackedPrices.has(`${side}@${price}`),
+    );
+    yield* placeLevelOrders(exchange, marketId, settings, state, side, prices);
+  }
+  if (!state.orders.some((o) => o.kind === "grid")) {
+    throw new Error(
+      `alphaGrid: no grid level clears the exchange minimum ${state.minCost} — raise volumePerLevel.`,
+    );
   }
   logger.info(`[AlphaGrid] Grid drawn: center ${layout.center}, spacing ${layout.spacing}, sides ${sides.join("+")}.`);
   return true;
@@ -473,6 +523,24 @@ function* syncStopOrder(
     throw new Error(`alphaGrid: remaining position ${state.totalQty} rounds to 0 at step ${state.stepSize} — manual recovery needed.`);
   }
   const side = directionToExitSide(state.direction);
+
+  // D42: a stop below exchange minimum is unplaceable (live venues reject it too).
+  // Skip loudly-once; the supervisor remains the protection. Existing stops stay.
+  if (state.minCost !== null && slQty * slPrice < state.minCost) {
+    if (!state.stopUnplaceable) {
+      state.stopUnplaceable = true;
+      logger.warn(
+        `[AlphaGrid] Layer-1 stop unplaceable (notional ${slQty * slPrice} < minimum ${state.minCost}) — supervisor-only protection. Raise volumePerLevel (need ≥ minNotional / (1 − stopPct/(100×lev))).`,
+      );
+    } else {
+      logger.debug(`[AlphaGrid] Layer-1 stop still unplaceable — supervisor-only.`);
+    }
+    return;
+  }
+  if (state.stopUnplaceable) {
+    state.stopUnplaceable = false;
+    logger.info(`[AlphaGrid] Layer-1 stop placeable again — resuming exchange-side protection.`);
+  }
 
   const existing = state.orders.find((o) => o.orderId === state.stopOrderId);
   const limitPrice =
@@ -606,20 +674,17 @@ function* maybeTrail(
   yield* cancelTrackedOrders(exchange, marketId, state, openIds, (o) => o.kind === "grid");
 
   const newCenter = state.centerPrice + delta;
-  const levels = buildGridLevels(newCenter, state.levelSpacing, settings.nLevels, state.tickSize);
+  const levels = buildViableGridLevels(newCenter, state.levelSpacing, settings.nLevels, state.tickSize);
   state.centerPrice = newCenter;
   state.gridTop = levels.gridTop;
   state.gridBottom = levels.gridBottom;
 
   const side = directionToGridSide(state.direction);
   const prices = side === "buy" ? levels.buyLevels : levels.sellLevels;
-  for (const price of prices) {
-    const quantity = roundQuantityToStep(settings.volumePerLevel, state.stepSize);
-    if (quantity <= 0) {
-      throw new Error(`alphaGrid: volumePerLevel ${settings.volumePerLevel} rounds to 0 at step ${state.stepSize}.`);
-    }
-    const placed = yield exchange.placeLimitOrder({ symbol: marketId, side, quantity, price });
-    state.orders.push({ orderId: placed.orderId, kind: "grid", side, price, quantity, filledSoFar: 0, filledValueSoFar: 0 });
+  const placed = yield* placeLevelOrders(exchange, marketId, settings, state, side, prices);
+  if (placed === 0) {
+    // Trailing into a dust regime: position stays stop/TP-managed (never hang the bot).
+    logger.warn(`[AlphaGrid] Trailed to ${newCenter} but no level clears minimum ${state.minCost} — grid empty, stops/TP manage.`);
   }
   logger.info(`[AlphaGrid] Trailed ${state.direction} ${shifts} block(s): center ${newCenter}.`);
 }

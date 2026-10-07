@@ -359,6 +359,34 @@ Why: exchange order rejection on tick violation is a silent-grid-killer; exact t
 also what §4.2 demands ("real tickSize/stepSize").
 Rejected: decimals-first derivation (lossy for odd/integer ticks); hardcoded decimals.
 
+### 2026-10-07 · D41 [AUTO]: S9 backtest architecture — dedicated driver, redeploy model
+
+What:
+(a) Upstream `Backtesting.run` drives the REAL `StrategyRunner` but matches only SMART-trade
+orders; alphaGrid needs IExchange-level matching. New dedicated driver in
+`packages/backtesting/src/alpha-grid/` reuses `createStrategyRunner` + `MemoryStore` +
+`MemoryExchange` (same strategy code path as live, §4.5) with its own loop:
+`nextCandle → exchange.processCandle (range-match) → runner.start/process → metrics`.
+Upstream `Backtesting`/`MarketSimulator` untouched.
+(b) `MemoryExchange` gains a real order book: limit/stop/market registration, per-candle
+range-crossing fills (limit buys low≤price, sells high≥price, stops cross slPrice),
+taker/maker commission + adverse slippage, fill journal, candle history for
+`getCandlesticks`, configurable tick/step. `getMarkPrice` stays close (D35 note).
+(c) Stop-outs do NOT halt the run: each models an operator redeploy (documented in the
+report). Detection is driver-side via state transitions (in-position → cleared with
+`cycleCount` unchanged = stop-out; `cycleCount`+1 = TP cycle) + exchange fill journal
+(stop-id filled = Layer-1 hit, else supervisor). `MemoryStore.stopBot` is a harmless noop.
+(d) Metrics on allocated CAPITAL (param): equity = capital + realized − fees + unrealized;
+total return %, max DD from the equity curve, win rate over closed cycles, stop-outs with
+ROI-at-trigger (asserted ≈ −40% in code), fees, liquidations (checked per candle, lev-1
+expects 0). Costs default: maker 2bps / taker 5bps (Binance VIP0), taker slippage 2bps,
+limits 0 (maker rests). Restart-model + costs stated in the report — no cherry-picking.
+Why: (a) reuses the live runner (parity) without disturbing smart-trade backtests; (b) fills
+the D11 gap additively; (c) one halted run tells nothing, redeploy-model reports everything;
+(d) dkalenov-style honesty requires full-distribution reporting.
+Rejected: shoehorning into `Backtesting.run` (wrong matching layer); halt-on-first-stop
+(single-cycle report); paper-trade "backtest" (D12 — no Layer 1).
+
 ### 2026-10-07 · D39 [AUTO]: Stop-order plumbing — triggerBasis + quantity convention
 
 What: `IPlaceStopOrderRequest` gains `reduceOnly?: boolean` + `triggerBasis?: "mark" | "last"`
@@ -374,6 +402,49 @@ Why: spec §4.4 demands mark-triggered reduceOnly stops; additive-optionals pres
 S10 proves the exchange actually honors both flags.
 Rejected: defaulting workingType globally (would silently change any future upstream caller);
 quote-currency stop qty (wrong for futures reduceOnly closes).
+
+### 2026-10-07 · D42 [AUTO]: Sub-min-notional stops skip Layer 1 (warn once, supervisor covers)
+
+What (found by the first S9 backtest run, real exchange behavior): a LONG stop at −40%/lev1
+is 60% of entry notional — small-size entries that clear MIN_NOTIONAL still produce
+REJECTABLE stops (Binance would 400 them too). `syncStopOrder` now skips placement when
+`slQty × slPrice < minCost`, warning once per transition via persisted
+`state.stopUnplaceable` (debug repeats, no spam); existing stops are left untouched;
+supervisor remains the protection. Consequence for sizing (report + S10 checklist):
+entries need ≥ minNotional / (1 − stopPct/(100×lev)) for Layer-1 viability.
+State version bumped 2 → 3 (shape change).
+Why: skipping mirrors the venue (no fantasy stops); loud-once beats spam and silence;
+the supervisor exists precisely for this degraded mode.
+Rejected: forcing sub-min stops (rejected live too); silent skip (masks missing layer);
+erroring the tick (a too-small position is operable under supervision, not fatal).
+
+### 2026-10-07 · D44 [AUTO]: Same-tick opposite grid fills NET (one-way invariant holds)
+
+What (found by the first S9 backtest run — live-race included): between polls, price can
+cross BOTH armed sides (hourly wicks routinely; 3s live polls rarely but possibly). The
+cancel-after-lock then loses the race and `fills[]` would hold both sides → old code threw,
+killing the run/bot. Rule: an opposite-side GRID fill nets against the open position —
+closes min(fill, totalQty) (driver values the scalp from journal + pre-tick avg), zeroes
+direction/fills on full close, flips with the remainder on overshoot (bounded: opposite
+resting orders die at lock). Partial nets keep fills[]/avgEntry exact pro-rata (same pattern
+as TP partials). TP/stop fills are exits, never netting candidates.
+Why: netting is the only economically correct response (a buy+sell with no position IS a
+closed scalp); throwing on real market behavior bricks live bots on wick days; the invariant
+(net position one-sided-or-flat) holds in all cases.
+Rejected: throw-on-mixed (bricks on wicks); ignoring the second fill (phantom position vs
+exchange truth — parity violation).
+
+### 2026-10-07 · D43 [AUTO]: Dust grid levels are skipped (warned), not fatal — unless all are dust
+
+What (found by the same S9 run): volatile microcap ATR spacing puts outer levels below
+MIN_NOTIONAL while inner levels are fine; aborting the whole draw would idle the bot for
+weeks and miss the pump it exists to catch (live venues reject per order, not per batch).
+`drawGrid`/trailing now skip sub-min levels with a warn count and place the rest; zero
+placeable levels still throws (sizing broken, operator fixes `volumePerLevel`). Shared
+`placeLevelOrders` helper serves both paths.
+Why: mirrors venue behavior per order; a partial honest grid beats a dead bot; the all-dust
+throw preserves the fail-loud sizing guard.
+Rejected: abort-on-first-dust (dead bot for weeks); silent skip (grid shape must be visible).
 
 ### 2026-10-07 · D40 [AUTO]: S8 supervisor + stop-hit + shared termination design
 
@@ -510,3 +581,42 @@ tick into an exception; invariant violations (mixed sides in a one-way position)
 for auditability, never silently average.
 Rejected: NaN propagation (poisons downstream orders); silent clamping of bad config (masks
 operator error on real-money-adjacent code).
+
+### 2026-10-07 · D46 [AUTO]: S9 sim-clock pinning + ruin/screen redesign (gap honesty)
+
+What:
+(a) The supervisor gates on wall-clock `Date.now()` — backtest ticks sharing one real
+millisecond would never evaluate it. The driver pins fake timers to each candle timestamp
+(same deterministic pattern as the S8 fake-timer tests); strategy code unchanged.
+(b) Stop fills are gap-aware: an open already beyond the trigger fills at the adverse open,
+not the stop (live gap reality); stop-limits still gap-miss honestly.
+(c) Liquidation accounting, three screens: fill-time ruin (exit fill ROI ≤ −100% → liq event
+with hadStop context, takes precedence); missed-stop tripwire (resting stop the range
+crossed but unfilled with unchanged id → throw, sim bug); naked post-tick ruin (surviving
+position, no resting stop, wick ≤ −100% → honest liq). Pre-tick screen removed (it double-
+counted wicks the stop handled same-candle).
+(d) Stop-out gate trio: early-fill (ROI above −stopLossPct+tol) throws; ruin (≤ −100%)
+routes to liquidation; else stop-out recorded. Liquidations are REPORTED (count + context),
+never asserted to zero — a naked wick ruin is a finding (size up for Layer-1, D42), and the
+M2 window indeed produced honest −16.88% with 0 liqs.
+(e) Test trap found the hard way: fake timers must be armed BEFORE setup ticks — arming
+after real-timer ticks jumps the clock backward and the throttle skips forever. Fake-first
+pattern is mandatory (HANDOFF traps).
+Why: (a) parity demands the supervisor actually run in backtest; (b–d) gap-through-stop is
+the dominant real risk on violent alts — the sim must price it, report it, and never hide it.
+Rejected: asserting zero liquidations (dishonest gate); close-only trigger checks (miss wicks);
+pre-tick liq screen (false positives on protected positions).
+
+### 2026-10-07 · D45 [AUTO]: Viability-aware grid assembly for microcap crash regimes (S9)
+
+What (found by the S9 backtest run): ATR spacing at 15%+ of price × 8 levels puts outer
+BUY levels at/below zero — unplaceable anywhere (no venue accepts non-positive prices).
+New additive S4 function `buildViableGridLevels` (symmetric builder untouched, still
+strict): skips non-positive buys, sells always viable (center/spacing > 0 asserted),
+`gridBottom` falls back to center when no buys exist, throws only if NOTHING is placeable
+(defensive). Strategy draw/trailing paths use it; S7 unit grids are fully viable so their
+expectations are unchanged.
+Why: aborting the whole grid on outer-level negativity would idle the bot through the
+exact crash regimes it hunts; per-level viability mirrors what venues accept.
+Rejected: catching S4's throw and shrinking (exception-driven flow); weakening the
+symmetric builder (destabilizes a DONE step's tested contract).

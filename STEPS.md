@@ -189,9 +189,12 @@ Acceptance criteria:
       triggered on total-PnL (asserted in code, not eyeballed).
 - [ ] Strategy code path identical in live/paper/backtest (local fills + mark price; no `ccxt` in logic).
 - [ ] Tag `alphaGrid-m1` (on S8 green) and `alphaGrid-m2` (on S9 green); PR
-      `feature/alphaGrid → dev` inside the human's fork opened only after human approval.
+      `feature/alphaGrid → dev` inside the human's fork opened only after human approval (human decision — HARD STOP rule: no PR from build sessions).
 
-Status: TODO.
+Status: DONE (driver reuses the live StrategyRunner + MemoryExchange order-book sim;
+AKEUSDT 1h 2026-09-01→10-07: −16.88% total, 22.95% maxDD, 94.23% win (98/104),
+6 stop-outs all ≈ −40.02% exchange-hit, $5.11 fees, 0 liqs; BACKTEST_AKEUSDT.md written;
+m1 already tagged (D24 map); m2 tags with this step — see DECISIONS.md D41–D46).
 
 ## S10 — Paper/testnet operation (M3, human-executed)
 
@@ -236,6 +239,8 @@ Status: TODO (out of scope for build sessions; human runs it).
   packages typecheck clean; app still 4 pre-existing errors (D35–D38).
 - 2026-10-07: S8 DONE (session 4+, muse-spark). Two-layer unrealized stop (D39–D40);
   13 stop tests; `bot-templates:test` 247/247; typecheck + lint clean. M1 COMPLETE → tag next.
-- 2026-10-07: S5 DONE (session 4+, muse-spark). `bot-templates/src/templates/alpha-grid/`
-  schema + stub + 206 tests (`bot-templates:test` first real suite); registry + dashboard-form
-  gate green; existing templates untouched (D30–D32).
+- 2026-10-07: S9 DONE (session 4+, muse-spark). MemoryExchange order-book sim + driver;
+  AKEUSDT 1h 09-01→10-07: −16.88%, 22.95% maxDD, 94.23% win (98/104), 6 stops ≈ −40.02%,
+  $5.11 fees, 0 liqs; BACKTEST_AKEUSDT.md; m2 tags with this step (D41–D46).
+  (Note: a stray duplicate S5 line stood here from an anchor misfire — removed; canonical
+  S5 entry above is untouched.)

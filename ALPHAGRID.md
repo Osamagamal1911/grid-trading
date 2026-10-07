@@ -85,12 +85,19 @@ profitable closed cycle does not prevent the next bleeding position from stoppin
 
 ## 4. Recommended settings per volatility regime
 
-(TBD — S9/S10. Table: calm / normal / high-volatility (Alpha listings) ×
-leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative defaults first.)
+M2 evidence (AKEUSDT 1h, 2026-09-01→10-07, lev 1, auto, full-protection defaults):
+−16.88% on $2000 with 94.23% win rate — 98 small TP wins (+3% ROI) outweighed by 6
+−40% stop-outs on averaged-down (large) positions. The grid-trader's curse, faithfully
+reproduced: averaging concentrates size into losers. Full report: BACKTEST_AKEUSDT.md.
 
 | Regime | leverage | nLevels | atrMultiplier | tpPct | stopLossPct | notes |
 |---|---|---|---|---|---|---|
-| TBD | | | | | | |
+| Calm range (untested) | 1–2 | 8 | 0.5 | 3.0 | 40.0 | Defaults; validate on data first |
+| High-volatility Alpha listing (M2-measured) | 1 | 8 | 0.5 | 3.0 | 40.0 | Loses to bleed at lev 1 — see above |
+| Pump-capture (LOBSTERUSDT 2026-10-07: +52.46% in ~8h) | 10, isolated | 6 | trailing on | n/a (TP rode) | unrealized stop as net | Profit came from the leveraged directional move + trailing, NOT oscillation |
+
+Conservative defaults first; leverage is the dominant risk knob (a 10x LOBSTER-style run
+needs the unrealized stop sized accordingly). Backtest YOUR coin/window before deploying.
 
 ## 5. Security model
 
@@ -122,7 +129,15 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
 
 ## 7. Backtest honesty (what the report means)
 
-(TBD — S9: total return, max drawdown, win rate, cycles, liquidations; unrealized ≈ −40% audit.)
+- Same strategy code as live (local fills + mark price; MemoryExchange simulates the venue).
+- Metrics are full-distribution: total return on allocated capital, max drawdown from the
+  equity curve (incl. unrealized), win rate over ALL closed cycles (TP + stops + netted),
+  every stop-out listed with unrealized ROI at trigger, fees, liquidations with context.
+- Sanity is asserted in code, not eyeballed: stops never fire early, crossed-but-unfilled
+  resting stops throw, TP cycles must net positive, liquidations are reported with
+  gap-through vs naked context. A green backtest run means all gates held.
+- Stop-outs do NOT halt the run: each models an operator redeploy. A 94% win rate can
+  still lose money (M2: −16.88%) — read total return first, win rate second.
 
 ## 8. Assumptions (explicit list — no silent choices)
 

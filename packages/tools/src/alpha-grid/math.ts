@@ -290,8 +290,54 @@ export function buildGridLevels(
   return {
     buyLevels,
     sellLevels,
-    gridTop: sellLevels[sellLevels.length - 1],
-    gridBottom: buyLevels[buyLevels.length - 1],
+    gridTop: sellLevels[sellLevels.length - 1] as number,
+    gridBottom: buyLevels[buyLevels.length - 1] as number,
+  };
+}
+
+/**
+ * Viability-aware grid assembly for microcap crash regimes (S9, D45).
+ * Same as buildGridLevels, except non-positive BUY levels are SKIPPED (venues can't
+ * take them either) instead of aborting the whole grid; sells are always viable.
+ * `gridBottom` falls back to center when no buy level survives. Throws only when
+ * nothing at all is placeable (sizing broken). Identical output to buildGridLevels
+ * whenever all levels are viable.
+ */
+export function buildViableGridLevels(
+  centerPrice: number,
+  levelSpacing: number,
+  nLevels: number,
+  tickSize: number,
+): AlphaGridLevels {
+  assertPositiveNumber("centerPrice", centerPrice);
+  assertPositiveNumber("levelSpacing", levelSpacing);
+  assertPositiveInt("nLevels", nLevels);
+  assertPositiveNumber("tickSize", tickSize);
+
+  const center = new Big(centerPrice);
+  const spacing = new Big(levelSpacing);
+
+  const buyLevels: number[] = [];
+  for (let i = 1; i <= nLevels; i += 1) {
+    const exact = Number(center.minus(spacing.mul(i)).toString());
+    if (exact <= 0) break;
+    const rounded = roundPriceToTick(exact, tickSize);
+    if (rounded <= 0) continue;
+    buyLevels.push(rounded);
+  }
+  const sellLevels: number[] = [];
+  for (let i = 1; i <= nLevels; i += 1) {
+    sellLevels.push(roundPriceToTick(Number(center.plus(spacing.mul(i)).toString()), tickSize));
+  }
+  if (buyLevels.length === 0 && sellLevels.length === 0) {
+    throw new Error(`alphaGrid math: no placeable grid level (center ${centerPrice}, spacing ${levelSpacing}).`);
+  }
+
+  return {
+    buyLevels,
+    sellLevels,
+    gridTop: sellLevels[sellLevels.length - 1] as number,
+    gridBottom: buyLevels.length > 0 ? (buyLevels[buyLevels.length - 1] as number) : centerPrice,
   };
 }
 

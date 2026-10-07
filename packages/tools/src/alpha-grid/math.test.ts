@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGridLevels,
+  buildViableGridLevels,
   computeAtrLevelSpacing,
   computeManualCenterPrice,
   computeManualLevelSpacing,
@@ -230,5 +231,17 @@ describe("grid spacing + levels", () => {
     expect(() => buildGridLevels(100, 0, 3, 0.01)).toThrow();
     expect(() => buildGridLevels(100, 10, 0, 0.01)).toThrow();
     expect(() => buildGridLevels(5, 10, 3, 0.01)).toThrow(); // buy level ≤ 0
+  });
+
+  it("viable builder matches the strict builder when all levels are viable", () => {
+    expect(buildViableGridLevels(100, 10, 3, 0.01)).toEqual(buildGridLevels(100, 10, 3, 0.01));
+  });
+
+  it("viable builder skips non-positive buys instead of aborting (D45)", () => {
+    const grid = buildViableGridLevels(5, 10, 3, 0.01);
+    expect(grid.buyLevels).toEqual([]);
+    expect(grid.sellLevels).toEqual([15, 25, 35]);
+    expect(grid.gridTop).toBe(35);
+    expect(grid.gridBottom).toBe(5); // falls back to center
   });
 });
