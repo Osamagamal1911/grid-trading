@@ -19,6 +19,9 @@ import type { BotTemplate } from "@opentrader/bot-processor";
 import * as templates from "./templates/index.js";
 
 export * from "./templates/index.js";
+// Schema/helpers for cross-package use (S7 strategy, S8 supervisor, S9 backtest).
+// Exported here — NOT via templates/index.js — so strategy enumeration stays clean (D14).
+export * from "./templates/alpha-grid/schema.js";
 
 export function findTemplate(template: string): BotTemplate<any> {
   if (template in templates) {

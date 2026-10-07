@@ -102,7 +102,10 @@ Acceptance criteria:
 - [ ] `useStopLoss=false` surfaces the no-stop-loss warning path (log + state flag the UI can render).
 - [ ] Existing templates (grid, grid-bot, dca, rsi) untouched.
 
-Status: TODO.
+Status: DONE (`src/templates/alpha-grid/` schema + stub + 206 tests green via `moon run
+bot-templates:test`; registry resolves with displayName/hidden/runPolicy/interval;
+plain-ZodObject schema keeps the dashboard form gate green; existing templates untouched —
+see DECISIONS.md D30–D32).
 
 ## S6 — ATR indicator (M1, §4.1/§4.2)
 
@@ -212,3 +215,6 @@ Status: TODO (out of scope for build sessions; human runs it).
   futures balance via S3 env path ✅ (spot-vision -2015 expected — futures-testnet keys).
 - 2026-10-07: S4 DONE (session 4+, muse-spark). `packages/tools/src/alpha-grid/math.ts`
   (D25–D29); 29 new tests, `tools:test` 104/104 (21 files); typecheck + lint clean; no ccxt.
+- 2026-10-07: S5 DONE (session 4+, muse-spark). `bot-templates/src/templates/alpha-grid/`
+  schema + stub + 206 tests (`bot-templates:test` first real suite); registry + dashboard-form
+  gate green; existing templates untouched (D30–D32).

@@ -96,3 +96,9 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
 8. (S4) All exchange prices floor to tick multiples, quantities to step multiples (D26/D29);
    max deviation one tick on triggers; supervisor re-syncs from exact values.
 9. (S4) Zero position → ROI 0%; empty fills → FLAT zeros; mixed-side fills and bad config throw (D28).
+10. (S5) Template tick is static 3000ms; per-bot pollIntervalMs honored by supervisor throttle (D30).
+11. (S5) Conditional validation enforced at startup by `validateAlphaGridSettings`, not in zod
+    (ZodEffects would break the dashboard form gate — D31). `symbol` stays raw in schema;
+    uppercase normalization at use (S7).
+12. (S5) nLevels ≤ 100, pollIntervalMs ≥ 1000 (operator-error guards); leverage uncapped
+    (exchange is the authority); no socket watchers — REST-only data path for live/backtest parity.

@@ -265,6 +265,61 @@ Why: predictability + auditability beat a ≤1-tick trigger refinement the super
 covers; every extra branch in stop math is a place to be wrong with real money.
 Rejected: side-aware rounding (marginal gain, 4× branch surface in the most critical functions).
 
+### 2026-10-07 · D30 [AUTO]: S5 template design — static interval + plain schema + separate validator
+
+What:
+(a) `interval`: upstream `setupInterval` (`packages/bot/src/bot.ts:181-191`) uses the STATIC
+`strategyFn.interval` — per-bot `pollIntervalMs` cannot drive the tick without a framework
+scheduling change. Template `interval = 3000` (== default `pollIntervalMs`); the S8 supervisor
+throttles internally to `settings.pollIntervalMs` (acts when now−lastTick ≥ pollIntervalMs:
+exact-or-slower, i.e. the safe direction for rate limits, ± one template tick).
+(b) `symbol` stays in schema (spec-literal, drives the deploy form); S7 treats
+`settings.symbol` as the futures-market source of truth vs framework `bot.symbol` pair slot.
+(c) Caps beyond spec: `nLevels ≤ 100` (order-count safety), `pollIntervalMs ≥ 1000` (hot-loop
+guard); `leverage ≥ 1` uncapped (exchange is the authority, S7 asserts the set-call).
+`symbol` = trim, min 1 (uppercase normalization deferred to S7 — see D31).
+(d) S5 ships the template generator as an inert stub (warns once on start, places NO orders);
+S7 implements the state machine in place.
+(e) No socket watchers: REST-only data path (`getMarketPrice`/`getCandlesticks`) is identical
+live/backtest with fewer moving parts; fill reactions land within one poll tick by design
+(same as the mirrored reference behavior).
+(f) `requiredHistory` = settings-driven fn returning 1m-candle counts for 20× atrTimeframe
+(15 closes seed ATR(14) + 5 buffer; same minute-math as upstream dca `requiredHistory`).
+Why: every item favors zero framework changes + auditability; (a) and (f) reuse verified
+upstream mechanics instead of inventing new ones.
+Rejected: widening `interval` to a per-bot function (scheduling-code blast radius for ±tick
+precision the throttle already covers); WebSocket watchers (backtest divergence surface);
+uncapped nLevels / sub-second polls (accidental order-storm / hot-loop footguns).
+
+### 2026-10-07 · D31 [AUTO]: Conditional rules live in `validateAlphaGridSettings()`, NOT zod refinements
+
+What (verified in code, §7 conflict report): `BotTemplate.schema` is typed
+`ZodObject<any,any,any>` AND `get-strategies/handler.ts` gates the dashboard form on
+`schema._def.typeName === "ZodObject"` (else the form gets an EMPTY schema). In zod v3,
+`.refine/.superRefine/.transform` all return `ZodEffects` — so encoding the §4.1b conditional
+rules (manual prices iff manual, percents iff toggles on) or the symbol uppercase transform
+IN the schema would break compilation AND silently empty the dashboard settings form.
+Smallest adjustment: schema stays a plain object (fields, defaults, int/min/max/positive,
+enums, `.describe()` — all ZodObject-safe, form renders fully); ALL conditional rules move to
+pure `validateAlphaGridSettings(settings: unknown): string[]` (empty = valid), enforced at
+bot/backtest startup in S7/S9 (fail loud). S5 tests target the validator per rule.
+Why: a rendered form + startup enforcement beats a type-broken template with an empty form;
+runtime validation additionally protects programmatic/CLI paths the form never sees.
+Rejected: ZodEffects schema (breaks type + dashboard); dropping conditional rules (spec-mandated);
+touching `getStrategies`/create-bot handler to unwrap effects (upstream change for zero gain).
+
+### 2026-10-07 · D32 [AUTO]: Templates namespace carries template functions ONLY (explicit export)
+
+What: first S5 version used `export *` for the alpha-grid subdir — its schema helpers/constants
+leaked into `templates/index.ts`, breaking `strategiesNames(templates)` typing AND (worse)
+poisoning the dashboard strategy enumeration (`getStrategies` lists every export as a strategy).
+Fix: `templates/index.ts` explicitly exports ONLY the `alphaGrid` template fn (+ its config type);
+schema/helpers export from package ROOT (`src/index.ts`), which no strategy enumeration reads.
+Subdir `index.ts` deleted to remove the footgun; in-package imports use direct relative paths.
+Caught by `tsc`, fixed before commit — no dashboard code touched.
+Why: the by-export registration (D14) makes namespace hygiene load-bearing; explicit > glob.
+Rejected: prefix-filtering strategies at enumeration time (upstream change, masks future leaks).
+
 ### 2026-10-07 · D24 [AUTO]: Milestone tags follow the explicit map (m1 at S7, m2 at S9)
 
 What: STEPS.md contains two statements about S8: the milestone map ("M1 = S1–S7 · M2 = S8–S9")
