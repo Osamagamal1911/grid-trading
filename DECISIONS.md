@@ -127,6 +127,39 @@ Rejected: a parallel registration mechanism.
 
 ## Session entries (append below; newest last)
 
+### 2026-10-07 · D17: Toolchain = user-local Node 22.12.0 + pnpm 10.12.1 (no sudo, no global mutation)
+
+What: Node installed from the official `linux-arm64` tarball into `~/.local/node-v22`
+(`export PATH="$HOME/.local/node-v22/bin:$PATH"` required in every shell); pnpm via
+`npm install -g pnpm@10.12.1` (lands in `~/.local/node-v22/bin`). Moon binary restored by
+running the skipped postinstall directly:
+`node node_modules/.pnpm/@moonrepo+cli@1.37.2/node_modules/@moonrepo/cli/postinstall.js`
+(because `pnpm install` ignored build scripts and `pnpm approve-builds` is interactive-only —
+piped `y` input does not register on its confirm prompt).
+Why: container had no node/npm/pnpm; user-local install avoids sudo and survives repo wipes
+but NOT machine switches — a next AI on another machine must reinstall (one command each, see HANDOFF).
+Rejected: `apt install nodejs` (wrong version, needs sudo); `proto` toolchain pin changes
+(out of scope for S1); committing binaries into the repo.
+
+### 2026-10-07 · D18: S1 baseline — all `packages/*` typecheck green; `app` has 4 pre-existing errors
+
+What: after `tsc --build` populates the gitignored `/dts` project-reference artifacts,
+direct `tsc --noEmit` passes (exit 0, 0 errors) in ALL 13 packages:
+types, tools, indicators, bot-templates, bot-processor, backtesting, exchanges, db,
+event-bus, logger, bot, trpc, prisma. `app:typecheck` fails with 4 pre-existing errors on the
+untouched tree (`cli.ts` import-attributes `assert`→`with`; `daemon-rpc.ts` trpc/SuperJSON
+transformer drift ×2; `utils/command.ts` logger overload) — NOT caused by us, NOT in scope
+(strategy work lives in `packages/*`; additive-only rule forbids drive-by fixes).
+Baseline tests: `indicators:test` 15/15 pass, `tools:test` 75/75 pass (20 files),
+`bot-templates:test` has no test files (expected — our S4/S5 tests will be the first).
+S1 acceptance "typecheck passes on the untouched tree" is therefore met for every package
+alphaGrid will touch; the `app` failure is recorded here as the honest baseline.
+Why: the first full `moon run :typecheck` looked red (TS6305 missing-`/dts` cascade that even
+faked `db` generic-type errors) — building references first was the correct read, verified
+package-by-package, instead of "fixing" phantom upstream errors.
+Rejected: fixing `app/` type errors in S1 (out of scope, violates additive-only);
+treating moon's cached failure output as current truth (always re-verify with direct `tsc`).
+
 ### 2026-10-07 · D16: Repo-local git identity = noreply email (privacy block workaround)
 
 What: `git config` (repo-local, NOT global) set to name `Osamagamal1911` + email

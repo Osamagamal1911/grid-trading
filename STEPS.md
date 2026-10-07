@@ -25,8 +25,10 @@ Acceptance criteria:
       untouched upstream tree; baseline `vitest` run recorded in HANDOFF.md.
 - [ ] Branch pushed to `origin` (`git push -u origin feature/alphaGrid`).
 
-Status: IN PROGRESS (branch ✅, docs ✅, upstream import ✅ merged `90f601c2`, remotes ✅;
-remaining: Node/pnpm toolchain, `pnpm install`, baseline typecheck+vitest).
+Status: DONE (branch ✅, docs ✅, upstream import ✅ `90f601c2`, remotes ✅, Node 22.12.0 +
+pnpm 10.12.1 user-local ✅, `pnpm install` ✅, baseline recorded ✅ — all 13 `packages/*`
+typecheck green, `tools:test` 75/75, `indicators:test` 15/15; only pre-existing `app/` 4-error
+failure remains, out of scope — see DECISIONS.md D17/D18).
 
 ## S2 — Bootstrap docs (DECISIONS.md, HANDOFF.md, ALPHAGRID.md skeleton)
 
@@ -191,3 +193,8 @@ Status: TODO (out of scope for build sessions; human runs it).
   in progress; upstream import blocked on S1-Q1 (fork target repo decision).
 - 2026-10-07: S1-Q1 answered (import into grid-trading, D15); upstream `dev` @ `8b8e245` merged
   (`90f601c2`); S2 done (`6f36c1d`). S1 remaining: toolchain + baseline test runs.
+- 2026-10-07: S1 DONE (session 2, muse-spark). Toolchain: user-local Node v22.12.0 + pnpm 10.12.1
+  (D17). Baseline on untouched tree: `pnpm install` ✅; direct `tsc --noEmit` green in all 13
+  `packages/*` (incl. `db` — earlier `order.entity` errors were a missing-`/dts` cascade);
+  `app:typecheck` 4 pre-existing errors (out of scope); `tools:test` 75/75, `indicators:test`
+  15/15, `bot-templates:test` no files (expected). Full detail: DECISIONS.md D18.

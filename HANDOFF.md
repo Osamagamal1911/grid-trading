@@ -4,6 +4,56 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
 
 ---
 
+## Session 2 — 2026-10-07 · muse-spark-1.3-free (OpenCode) · S1 toolchain + baseline
+
+### Completed this session
+
+- Installed toolchain user-local (no sudo): Node v22.12.0 (`~/.local/node-v22`, ARM64 tarball)
+  + pnpm 10.12.1; restored moon 1.37.2 binary via direct postinstall run (see D17 for why
+  `approve-builds` couldn't be used non-interactively). `export PATH="$HOME/.local/node-v22/bin:$PATH"`
+  required in every new shell on this machine.
+- `pnpm install` ✅ (~18s, prisma generate ok).
+- Baseline on untouched tree: direct `tsc --noEmit` green in ALL 13 `packages/*`
+  (types/tools/indicators/bot-templates/bot-processor/backtesting/exchanges/db/event-bus/logger/bot/trpc/prisma).
+  `app:typecheck` = 4 pre-existing errors (cli import-attributes, trpc transformer ×2, logger overload).
+  `tools:test` 75/75 (20 files), `indicators:test` 15/15, `bot-templates:test` no files (expected).
+- S1 marked DONE in STEPS.md (with the `app/` caveat); D17+D18 appended to DECISIONS.md.
+- Key correction this session: the scary first `moon run :typecheck` failure (incl. fake `db`
+  generic errors) was just missing `/dts` composite artifacts — `tsc --build` then per-package
+  `tsc --noEmit` is the true baseline. Moon also serves stale CACHED failure output; always
+  re-verify with direct `tsc` (D18).
+
+### In progress (exact state)
+
+- S1 DONE, committed + pushed (see commit below). No strategy code written (correct per §8.5 — S1/S2 are docs+setup).
+- S3 (env credentials) is next. NOT STARTED.
+
+### Next steps (concrete, ordered)
+
+1. `git pull` on `feature/alphaGrid` (this session's commit is pushed).
+2. Start S3: env-based `BINANCE_API_KEY`/`BINANCE_API_SECRET` loading; grep-audit; testnet/paper default; unit test for missing-var error.
+3. Then S4 → S5 → S6 → S7 → S8 → tag `alphaGrid-m1` → S9 → tag `alphaGrid-m2` → PR (human approval).
+
+### Blockers / open questions for the human
+
+- None blocking. Note: toolchain lives in `~/.local/` on THIS machine only — if the next session
+  runs elsewhere, reinstall Node 22.12 + pnpm 10.12.1 first (one-liners in D17).
+
+### What the next AI must NOT redo / traps to avoid
+
+- Do NOT "fix" `app/` type errors or `db` — `db` is green; `app` failures are pre-existing/out of scope.
+- Do NOT trust `moon run :typecheck` red output at face value — build `/dts` first (`tsc --build`),
+  then verify per-package with direct `tsc --noEmit`; moon caches failures.
+- Do NOT run `pnpm approve-builds` expecting piped input to work — use the direct postinstall recipe in D17.
+- All Session-1 traps still apply (no `master` commits, no secret staging, no rebase across import merge).
+
+### Commit planned
+
+- `alphaGrid: S1 toolchain + baseline typecheck/vitest` (STEPS/DECISIONS/HANDOFF only), then
+  `git push origin feature/alphaGrid`.
+
+---
+
 ## Session 1 — 2026-10-07 · muse-spark-1.3-free (OpenCode) · bootstrap session
 
 ### Completed this session
