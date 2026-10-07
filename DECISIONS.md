@@ -265,6 +265,36 @@ Why: predictability + auditability beat a ≤1-tick trigger refinement the super
 covers; every extra branch in stop math is a place to be wrong with real money.
 Rejected: side-aware rounding (marginal gain, 4× branch surface in the most critical functions).
 
+### 2026-10-07 · D33 [AUTO]: S6 ATR delegates to the already-vendored `technicalindicators` (D13 clarification)
+
+What: D13 ("no ATR upstream; add atr.ts") assumed no TA lib and rejected vendoring one. Verified:
+upstream indicators are thin wrappers around `technicalindicators@3.1.0` (ALREADY a dependency —
+rsi/ema/sma all delegate to it), and its ATR IS Wilder's smoothing (TrueRange → WEMA with α=1/N
+seeded by SMA — confirmed in lib source). So `atr.ts` follows the exact module pattern
+(async fn, `IndicatorError`, NaN-padding) delegating to the vendored lib: zero new dependencies,
+verified Wilder-correct by a hand-computed fixture test (not by trusting docs).
+The indicators package keeps its zero-workspace-dependency layering, so the ATR→spacing→grid
+composition test lives in S7 (strategy owns wiring); S6 proves indicator purity + exchange-shaped
+input handling. Manual mode bypasses ATR entirely (S7 selection).
+Why: hand-rolling a third smoothing implementation beside the vendored Wilder-correct one is NIH
+with real divergence risk; D13's core (atr.ts in indicators, module pattern) stands unchanged.
+Rejected: hand-rolled Wilder loop (duplicates vendored-correct code); adding a second TA lib;
+putting composition tests in indicators (would add a workspace dep to a currently leaf package).
+
+### 2026-10-07 · D34 [AUTO]: Lib ATR seeds from candle 2 — delegation stands (documented, tested)
+
+What: probing revealed the vendored ATR skips TR[0] (no previous close for candle 1):
+first defined value sits at candle index `periods` (seed = SMA of TR[1..periods]), NOT the
+textbook SMA(TR[0..periods−1]). After warmup both converge (Wilder smoothing forgets the seed
+exponentially); grid spacing uses the latest value after 20+ closes, so the difference is
+trading-irrelevant. Delegation stands: behavior is exact-pinned by a hand-derived fixture test,
+the S5 warmup buffer (20 closes) absorbs the +1 shift, and pattern consistency beats a 15-line
+fork that would need its own audit trail.
+Why: the deviation is characterized, bounded, and covered — forking the lib over a converged
+seed transient would trade a documented property for unaudited novelty.
+Rejected: hand-rolled textbook loop (see above); asserting textbook values against lib output
+(would fail — tests assert the documented actual behavior instead).
+
 ### 2026-10-07 · D30 [AUTO]: S5 template design — static interval + plain schema + separate validator
 
 What:

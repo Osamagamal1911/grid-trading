@@ -118,7 +118,10 @@ Acceptance criteria:
 - [ ] Works through the strategy's candle subscription for `atrTimeframe` (default `1h`).
 - [ ] `levelSpacing = atrMultiplier × ATR` wired into grid construction; manual mode bypasses ATR.
 
-Status: TODO.
+Status: DONE (`atr()` + `latestAtrValue()` in `packages/indicators/src/indicators/atr.ts`,
+8 new tests: hand-computed Wilder fixture + independent cross-check + module-pattern behavior;
+exchange-shaped feed proven. Spacing→grid SELECTION wiring is S7 strategy code by layering —
+pure pieces ready (S4 `computeAtrLevelSpacing`/`buildGridLevels`); see DECISIONS.md D33/D34).
 
 ## S7 — Strategy core: state machine + trailing + TP sync (M1, §4.3)
 
@@ -215,6 +218,11 @@ Status: TODO (out of scope for build sessions; human runs it).
   futures balance via S3 env path ✅ (spot-vision -2015 expected — futures-testnet keys).
 - 2026-10-07: S4 DONE (session 4+, muse-spark). `packages/tools/src/alpha-grid/math.ts`
   (D25–D29); 29 new tests, `tools:test` 104/104 (21 files); typecheck + lint clean; no ccxt.
+- 2026-10-07: S5 DONE (session 4+, muse-spark). `bot-templates/src/templates/alpha-grid/`
+  schema + stub + 206 tests (`bot-templates:test` first real suite); registry + dashboard-form
+  gate green; existing templates untouched (D30–D32).
+- 2026-10-07: S6 DONE (session 4+, muse-spark). `indicators/.../atr.ts` (Wilder, vendored lib,
+  D33) + 8 tests; `indicators:test` 23/23; typecheck + lint clean. Spacing→grid wiring → S7.
 - 2026-10-07: S5 DONE (session 4+, muse-spark). `bot-templates/src/templates/alpha-grid/`
   schema + stub + 206 tests (`bot-templates:test` first real suite); registry + dashboard-form
   gate green; existing templates untouched (D30–D32).

@@ -102,3 +102,5 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
     uppercase normalization at use (S7).
 12. (S5) nLevels ≤ 100, pollIntervalMs ≥ 1000 (operator-error guards); leverage uncapped
     (exchange is the authority); no socket watchers — REST-only data path for live/backtest parity.
+13. (S6) Vendored ATR seeds from candle 2 (no TR without prev close); first value at index
+    `periods`; 20-close warmup covers it. Spacing uses the latest value only.
