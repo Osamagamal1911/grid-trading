@@ -64,6 +64,19 @@ export class PaperExchange extends CCXTExchange {
   }
 
   /**
+   * alphaGrid S7 (D35): record-only leverage in the simulator — never touches
+   * the network (the wrapped live ccxt instance is market-data only here).
+   */
+  public appliedLeverage: { symbol: string; leverage: number } | null = null;
+
+  async setLeverage(symbol: string, leverage: number): Promise<void> {
+    if (!Number.isInteger(leverage) || leverage < 1) {
+      throw new Error(`alphaGrid: leverage must be a positive integer, got ${leverage}.`);
+    }
+    this.appliedLeverage = { symbol, leverage };
+  }
+
+  /**
    * @override
    */
   async destroy() {

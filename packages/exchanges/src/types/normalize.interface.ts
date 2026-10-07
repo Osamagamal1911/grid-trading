@@ -12,6 +12,8 @@ import type {
   IGetLimitOrderResponse,
   IGetMarketPriceRequest,
   IGetMarketPriceResponse,
+  IGetMarkPriceRequest,
+  IGetMarkPriceResponse,
   IGetSymbolInfoRequest,
   IPlaceOrderRequest,
   IPlaceOrderResponse,
@@ -90,6 +92,11 @@ export type Normalize = {
   getMarketPrice: {
     request: (params: IGetMarketPriceRequest) => Parameters<Exchange["fetchTicker"]>;
     response: (data: Ticker) => IGetMarketPriceResponse;
+  };
+
+  getMarkPrice: {
+    request: (params: IGetMarkPriceRequest) => Parameters<Exchange["fetchMarkPrice"]>;
+    response: (data: Ticker) => IGetMarkPriceResponse;
   };
 
   getCandlesticks: {

@@ -14,6 +14,11 @@ export interface IPlaceMarketOrderRequest {
    * Quantity to buy or sell.
    */
   quantity: number;
+  /**
+   * alphaGrid S7 (D35): close-only flag, forwarded to the exchange when true.
+   * Every order that reduces/closes a position MUST set this (spec §3).
+   */
+  reduceOnly?: boolean;
 }
 
 export interface IPlaceMarketOrderResponse {

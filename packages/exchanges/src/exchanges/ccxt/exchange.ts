@@ -27,6 +27,8 @@ import type {
   IGetLimitOrderResponse,
   IGetMarketPriceRequest,
   IGetMarketPriceResponse,
+  IGetMarkPriceRequest,
+  IGetMarkPriceResponse,
   IGetOpenOrdersRequest,
   IGetOpenOrdersResponse,
   IGetSymbolInfoRequest,
@@ -196,6 +198,20 @@ export class CCXTExchange implements IExchange {
     const data = await this.ccxt.fetchTicker(...args);
 
     return normalize.getMarketPrice.response(data);
+  }
+
+  async getMarkPrice(params: IGetMarkPriceRequest): Promise<IGetMarkPriceResponse> {
+    const args = normalize.getMarkPrice.request(params);
+    const data = await this.ccxt.fetchMarkPrice(...args);
+
+    return normalize.getMarkPrice.response(data);
+  }
+
+  async setLeverage(symbol: string, leverage: number): Promise<void> {
+    if (!Number.isInteger(leverage) || leverage < 1) {
+      throw new Error(`alphaGrid: leverage must be a positive integer, got ${leverage}.`);
+    }
+    await this.ccxt.setLeverage(leverage, symbol);
   }
 
   async getCandlesticks(params: IGetCandlesticksRequest): Promise<ICandlestick[]> {

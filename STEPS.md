@@ -141,7 +141,11 @@ Acceptance criteria:
       test asserts the call, not just a log line.
 - [ ] Full test suite green.
 
-Status: TODO.
+Status: DONE (strategy core + 21 strategy tests + 7 market tests green, `bot-templates:test`
+234/234; framework gaps closed additively (reduceOnly limit/market, setLeverage, getMarkPrice);
+`bot:test` 2 beforeAll DB-fixture failures proven pre-existing via stash round-trip
+(identical on pristine tree); app still exactly 4 pre-existing errors —
+see DECISIONS.md D35–D38).
 
 ## S8 — Two-layer unrealized stop (M1+M3, §4.4)
 
@@ -223,6 +227,9 @@ Status: TODO (out of scope for build sessions; human runs it).
   gate green; existing templates untouched (D30–D32).
 - 2026-10-07: S6 DONE (session 4+, muse-spark). `indicators/.../atr.ts` (Wilder, vendored lib,
   D33) + 8 tests; `indicators:test` 23/23; typecheck + lint clean. Spacing→grid wiring → S7.
+- 2026-10-07: S7 DONE (session 4+, muse-spark). `bot-templates/.../alpha-grid/strategy.ts`
+  (state machine + trailing + TP sync) + 28 tests; `bot-templates:test` 234/234; all touched
+  packages typecheck clean; app still 4 pre-existing errors (D35–D38).
 - 2026-10-07: S5 DONE (session 4+, muse-spark). `bot-templates/src/templates/alpha-grid/`
   schema + stub + 206 tests (`bot-templates:test` first real suite); registry + dashboard-form
   gate green; existing templates untouched (D30–D32).

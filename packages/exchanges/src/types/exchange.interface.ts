@@ -4,6 +4,8 @@ import {
   ICandlestick,
   IGetMarketPriceRequest,
   IGetMarketPriceResponse,
+  IGetMarkPriceRequest,
+  IGetMarkPriceResponse,
   ICancelLimitOrderRequest,
   ICancelLimitOrderResponse,
   IGetLimitOrderRequest,
@@ -55,6 +57,15 @@ export interface IExchange {
   getClosedOrders: (body: IGetClosedOrdersRequest) => Promise<IGetClosedOrdersResponse>;
   getTicker: (symbol: string) => Promise<ITicker>;
   getMarketPrice: (params: IGetMarketPriceRequest) => Promise<IGetMarketPriceResponse>;
+  /**
+   * alphaGrid S7 (D35): mark price for triggers — never last price (spec §3).
+   */
+  getMarkPrice: (params: IGetMarkPriceRequest) => Promise<IGetMarkPriceResponse>;
+  /**
+   * alphaGrid S7 (D35): apply futures leverage on the exchange. The strategy calls
+   * this at startup and tests assert the CALL (dkalenov lesson b — never log-only).
+   */
+  setLeverage: (symbol: string, leverage: number) => Promise<void>;
   getCandlesticks: (params: IGetCandlesticksRequest) => Promise<ICandlestick[]>;
   getSymbols: () => Promise<ISymbolInfo[]>;
   getSymbol: (params: IGetSymbolInfoRequest) => Promise<ISymbolInfo>;

@@ -1,24 +1,21 @@
-import type { IBotConfiguration, TBotContext } from "@opentrader/bot-processor";
-import { logger } from "@opentrader/logger";
+import type { TBotContext } from "@opentrader/bot-processor";
 import {
   ALPHA_GRID_DEFAULT_POLL_INTERVAL_MS,
   alphaGridRequiredHistoryMinutes,
   alphaGridSchema,
+  type AlphaGridBotConfig,
   type AlphaGridSettings,
 } from "./schema.js";
+import { alphaGridStrategy } from "./strategy.js";
 
 /**
  * alphaGrid — "Alpha Grid" futures grid with an unrealized-PnL two-layer stop.
  *
- * S5: template registration (schema, display, run policy). The generator body is
- * an inert stub on purpose (D30) — S7 implements the §4.3 state machine here.
- * The stub places NO orders; it only warns once at startup.
+ * Template registration (schema, display, run policy); the §4.3 state machine
+ * lives in strategy.ts (S7) and runs here.
  */
 export function* alphaGrid(ctx: TBotContext<AlphaGridBotConfig>) {
-  if (ctx.onStart) {
-    logger.warn("[AlphaGrid] S7 state machine not yet implemented — bot idles, no orders placed.");
-  }
-  return;
+  yield* alphaGridStrategy(ctx);
 }
 
 alphaGrid.displayName = "Alpha Grid";
@@ -39,5 +36,3 @@ alphaGrid.requiredHistory = (botConfig: AlphaGridBotConfig) => {
     typeof raw === "string" ? (JSON.parse(raw) as Partial<AlphaGridSettings>) : (raw as Partial<AlphaGridSettings>);
   return alphaGridRequiredHistoryMinutes(settings.atrTimeframe ?? "1h");
 };
-
-export type AlphaGridBotConfig = IBotConfiguration<AlphaGridSettings>;

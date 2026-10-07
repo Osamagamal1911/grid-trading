@@ -7,6 +7,8 @@ import type {
   ICandlestick,
   IGetMarketPriceRequest,
   IGetMarketPriceResponse,
+  IGetMarkPriceRequest,
+  IGetMarkPriceResponse,
   ICancelLimitOrderRequest,
   ICancelLimitOrderResponse,
   IPlaceOrderRequest,
@@ -140,6 +142,33 @@ export class MemoryExchange implements IExchange {
       price: assetPrice,
       timestamp: 0,
     };
+  }
+
+  /**
+   * alphaGrid S7 (D35): backtest mark-price approximation = current candle close.
+   * Candle RANGE-crossing (not close) drives stop/TP trigger simulation in S9 —
+   * this point query exists so strategy code never branches live-vs-backtest.
+   */
+  async getMarkPrice(params: IGetMarkPriceRequest): Promise<IGetMarkPriceResponse> {
+    const candlestick = this.marketSimulator.currentCandle;
+
+    return {
+      symbol: params.symbol,
+      markPrice: candlestick.close,
+      timestamp: candlestick.timestamp,
+    };
+  }
+
+  /**
+   * alphaGrid S7 (D35): record-only leverage for the backtester (S9 reports it).
+   */
+  public appliedLeverage: { symbol: string; leverage: number } | null = null;
+
+  async setLeverage(symbol: string, leverage: number): Promise<void> {
+    if (!Number.isInteger(leverage) || leverage < 1) {
+      throw new Error(`alphaGrid: leverage must be a positive integer, got ${leverage}.`);
+    }
+    this.appliedLeverage = { symbol, leverage };
   }
 
   async getCandlesticks(_params: IGetCandlesticksRequest): Promise<ICandlestick[]> {

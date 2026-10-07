@@ -10,21 +10,43 @@ pump-capture trailing. Filled in S5/S7.)
 
 ## 2. How it works
 
+Live strategy: `packages/bot-templates/src/templates/alpha-grid/strategy.ts` (S7).
+Identical code path in backtest (local fills + mark price, no `ccxt` in logic).
+
 ### 2.1 Grid construction (ATR vs manual)
 
-(TBD — S6/S7.)
+- ATR mode (default): last 30 `atrTimeframe` candles → ATR(14) → spacing =
+  `atrMultiplier × ATR`; grid centered on current mark price. Insufficient history:
+  no orders until 15+ closes (waits, never guesses).
+- Manual mode: spacing = `(high−low)/(2×nLevels)`, centered at `(high+low)/2`, so the
+  outermost levels coincide with the range edges (assumption §8.7).
+- `nLevels` buy limits below + `nLevels` sell limits above (armed side only once locked);
+  all prices floored to the real tick, quantities to the real step (§8.8).
 
 ### 2.2 Direction modes (long / short / auto + first-fill lock)
 
-(TBD — S7.)
+- `long`: only buys armed. `short`: only sells armed. `auto`: both armed.
+- First fill locks direction; opposite resting orders canceled immediately. One position
+  cycle per symbol, one-way mode (assumption §8.1).
+- `settings.symbol` (e.g. AKEUSDT → `AKE/USDT:USDT`) is the market source of truth.
 
 ### 2.3 Position averaging + single TP for the whole position
 
-(TBD — S7.)
+- Fills append to `fills[]`; `avgEntry` recomputed after EVERY fill (S4 math).
+- Exactly ONE reduceOnly TP limit for the whole position at the ROI TP price,
+  re-placed whenever avgEntry/qty drift (idempotent — no churn when in sync).
+- Grid levels are NOT replaced after filling (depleting grid, ≤ nLevels fills);
+  profit comes from the ROI TP, not oscillation. TP fill → cycle closes → FLAT redraw.
+- Partial fills accumulate exactly (executed value-weighted); TP partials reduce the
+  remainder pro-rata (avgEntry stays exact).
 
 ### 2.4 Trailing / pump-capture mode
 
-(TBD — S7. Include LOBSTERUSDT 2026-10-07 reference setup.)
+- LONG + mark above grid top (SHORT mirrored below bottom): one-shot shift of the whole
+  grid by whole `trailingShiftLevels` blocks; position and TP untouched — keeps riding
+  pumps instead of idling at the top (validated 2026-10-07 LOBSTERUSDT setup: 10x, 6 grids,
+  +52.46% in ~8h came from the directional move + trailing, not oscillation).
+- `useTrailing=false`: classic fixed grid; out-of-range idles with a UI-visible flag.
 
 ## 3. The two-layer unrealized stop (key feature)
 
@@ -104,3 +126,7 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
     (exchange is the authority); no socket watchers — REST-only data path for live/backtest parity.
 13. (S6) Vendored ATR seeds from candle 2 (no TR without prev close); first value at index
     `periods`; 20-close warmup covers it. Spacing uses the latest value only.
+14. (S7) Ticks read precision-first (Binance TICK_SIZE mode verified in ccxt source — D38).
+15. (S7) Restart with untracked open orders for the symbol = loud refusal (never adopt or
+    blind-cancel others' orders); crash orphans recover by manual cancel + restart (D36).
+16. (S7) Unfillable dust (remainder below stepSize) = loud error for manual recovery (D37a).

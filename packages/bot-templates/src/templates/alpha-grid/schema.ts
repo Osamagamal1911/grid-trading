@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import type { IBotConfiguration } from "@opentrader/bot-processor";
 import { barSizeDurationMap } from "@opentrader/tools";
 import type { BarSize } from "@opentrader/types";
 
@@ -68,6 +69,9 @@ export const alphaGridSchema = z.object({
 });
 
 export type AlphaGridSettings = z.infer<typeof alphaGridSchema>;
+
+/** Bot configuration for the alphaGrid template (settings + framework fields). */
+export type AlphaGridBotConfig = IBotConfiguration<AlphaGridSettings>;
 
 function isValidTimeframe(value: unknown): value is BarSize {
   return typeof value === "string" && value in barSizeDurationMap;

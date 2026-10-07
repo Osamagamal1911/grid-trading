@@ -60,7 +60,11 @@ const placeOrder: Normalize["placeOrder"] = {
 };
 
 const placeLimitOrder: Normalize["placeLimitOrder"] = {
-  request: (params) => [params.symbol, params.side, params.quantity, params.price],
+  // alphaGrid S7 (D35): forward `reduceOnly` when set; call shape unchanged otherwise.
+  request: (params) =>
+    params.reduceOnly
+      ? [params.symbol, params.side, params.quantity, params.price, { reduceOnly: true }]
+      : [params.symbol, params.side, params.quantity, params.price],
   response: (order) => ({
     orderId: order.id,
     clientOrderId: order.clientOrderId,
@@ -68,7 +72,11 @@ const placeLimitOrder: Normalize["placeLimitOrder"] = {
 };
 
 const placeMarketOrder: Normalize["placeMarketOrder"] = {
-  request: (params) => [params.symbol, params.side, params.quantity],
+  // alphaGrid S7 (D35): forward `reduceOnly` when set; call shape unchanged otherwise.
+  request: (params) =>
+    params.reduceOnly
+      ? [params.symbol, params.side, params.quantity, undefined, { reduceOnly: true }]
+      : [params.symbol, params.side, params.quantity],
   response: (order) => ({
     orderId: order.id,
     clientOrderId: order.clientOrderId,
@@ -170,6 +178,24 @@ const getMarketPrice: Normalize["getMarketPrice"] = {
     price: ticker.last! || ticker.bid! || ticker.ask!,
     timestamp: ticker.timestamp!,
   }),
+};
+
+// alphaGrid S7 (D35): mark price for triggers — NEVER falls back to last price.
+// Throws when the exchange yields no mark (fail loud beats silent last-price, D4).
+const getMarkPrice: Normalize["getMarkPrice"] = {
+  request: (params) => [params.symbol],
+  response: (ticker) => {
+    const raw = ticker.markPrice ?? (ticker.info as { markPrice?: string | number } | undefined)?.markPrice;
+    const markPrice = typeof raw === "string" ? Number.parseFloat(raw) : raw;
+    if (markPrice === undefined || !Number.isFinite(markPrice)) {
+      throw new Error(`alphaGrid: mark price unavailable for ${ticker.symbol} (refusing last-price fallback).`);
+    }
+    return {
+      symbol: ticker.symbol,
+      markPrice,
+      timestamp: ticker.timestamp!,
+    };
+  },
 };
 
 const getCandlesticks: Normalize["getCandlesticks"] = {
@@ -299,6 +325,7 @@ export const normalize: Normalize = {
   getClosedOrders,
   getTicker,
   getMarketPrice,
+  getMarkPrice,
   getCandlesticks,
   getSymbol,
   getSymbols,

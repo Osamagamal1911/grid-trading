@@ -6,5 +6,4 @@ export * from "./rsi.js";
 // exports helpers/constants that must NOT enter this namespace — `findStrategy`
 // and the dashboard strategy list enumerate every export here as a strategy (D14).
 export { alphaGrid } from "./alpha-grid/alpha-grid.js";
-export type { AlphaGridBotConfig } from "./alpha-grid/alpha-grid.js";
 export * from "./test/index.js";

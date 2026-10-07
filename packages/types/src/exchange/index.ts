@@ -5,6 +5,7 @@ export * from "./market-data/get-trades.js";
 export * from "./market-data/get-orderbook.js";
 export * from "./market-data/get-ticker.js";
 export * from "./public-data/get-market-price.js";
+export * from "./public-data/get-mark-price.js";
 export * from "./public-data/get-symbols-info.js";
 export * from "./trade/common/enums.js";
 export * from "./trade/cancel-limit-order.js";

@@ -295,6 +295,70 @@ seed transient would trade a documented property for unaudited novelty.
 Rejected: hand-rolled textbook loop (see above); asserting textbook values against lib output
 (would fail — tests assert the documented actual behavior instead).
 
+### 2026-10-07 · D35 [AUTO]: S7 framework gaps — reduceOnly (limit/market), setLeverage, getMarkPrice
+
+What:
+(a) `reduceOnly?: boolean` added to `IPlaceLimitOrderRequest` + `IPlaceMarketOrderRequest`
+(optional, backward compatible); normalize appends a ccxt `params` object ONLY when true
+(no-params call shape otherwise unchanged). Stop-order reduceOnly + mark-trigger stay S8 (D10).
+(b) `IExchange.setLeverage(symbol, leverage)` added; CCXTExchange → `ccxt.setLeverage`;
+PaperExchange overrides record-only (no network); MemoryExchange records (S9 simulates).
+(c) `IExchange.getMarkPrice(symbol)` added (`{symbol, markPrice, timestamp}`); CCXTExchange →
+`fetchMarkPrice`, throws when the endpoint yields no mark (never silently falls back to last,
+D4); MemoryExchange stub = candle close (S9 refines trigger-crossing); PaperExchange inherits.
+(d) Strategy uses `ctx.exchange` directly, never `yield useExchange()` — fewer runner-map
+dependencies, identical instance, strictly safer for backtest parity.
+Why: spec mandates reduceOnly exits, real leverage application (dkalenov lesson b), and
+mark-price triggers — none exist upstream; each addition is optional-or-new (nothing breaks).
+Rejected: stuffing flags through untyped ccxt passthrough from strategy code (breaks parity +
+audit); reusing last-price `getMarketPrice` as mark (spec-forbidden); leverage via dashboard-only
+manual setting (the exact failure dkalenov admitted).
+
+### 2026-10-07 · D36 [AUTO]: S7 state shape + restart reconciliation + foreign-order refusal
+
+What: persisted `AlphaGridRuntimeState` (versioned, fills[] append-only, tracked orders with
+`filledSoFar`, TP id, grid geometry, cycleCount, noStopLossAck). Every tick reconciles:
+tracked orders vs `getOpenOrders` → fill deltas recorded (partials accumulate via filledSoFar),
+missing tracked orders resolved via `getLimitOrder` (filled → account remainder; canceled →
+drop). ANY untracked open order for the symbol → throw listing IDs (never touch others'
+orders). Crash-between-place-and-save orphans surface as exactly this loud error; recovery =
+cancel strays on the exchange, restart (documented in ALPHAGRID). No clientOrderId adoption
+(normalize drops it today; exchange-specific semantics — not worth a second framework gap).
+Why: restart-safety is the M3 kill-test's cousin — state must rehydrate to truth, and the only
+safe response to unknown live orders is refusal, never adoption or blind cancel.
+Rejected: blind cancel-all on start (could kill the operator's manual orders); silent adoption
+of unknown orders (unknown intent + fill state); clientOrderId re-adoption (framework gap).
+
+### 2026-10-07 · D37 [AUTO]: S7 execution semantics (partials, guards, trailing, stops)
+
+What:
+(a) TP partial fills reduce `totalQty` only (`fills[]` immutable → avgEntry stays exact
+pro-rata); dust remainder below stepSize with no closable qty → loud error (manual recovery).
+(b) Startup min-cost guard: every placed level's notional must clear `limits.cost.min`
+(else throw naming the level — operator raises `volumePerLevel`).
+(c) Trailing = ONE-SHOT shift (compute count from overshoot, single cancel-all + redraw),
+position/TP untouched; `useTrailing=false` out-of-range idles with `idleOutOfRange` state flag.
+(d) Manual stop (onStop): cancel tracked + market-close remainder reduceOnly + clear; NEVER
+calls `control.stop()` (framework owns lifecycle). SL-hit `control.stop()` is S8's.
+(e) S7 implements NO ROI force-close (that's the S8 supervisor); S7's only exits are TP,
+trailing-aware grid management, and manual stop.
+Why: each rule keeps money behavior predictable and testable; (a) preserves avgEntry exactly;
+(c) avoids order spam on gap pumps (the LOBSTER case); (e) keeps step boundaries atomic.
+Rejected: grid re-placement of filled levels (spec: depleting grid, TP-on-whole-position);
+per-shift trailing loops (order spam); S7 stop-guards (would pre-empt S8's tested supervisor).
+
+### 2026-10-07 · D38 [AUTO]: Tick sizes read precision-first (Binance is TICK_SIZE mode)
+
+What: `marketPrecisionFromSymbolInfo` uses `precision` values directly as ticks and only
+falls back to `decimals` (10^-d) when precision is missing. Verified in ccxt source that
+Binance `precisionMode` is TICK_SIZE, so precision floats (0.01, 0.25, even integer 1.0)
+ARE exact ticks. Decimals-first would mis-round odd ticks (0.25 → 0.1, PRICE_FILTER
+rejection) and integer ticks (1.0 → 0.1). An earlier decimals-first draft was corrected
+before commit after this verification.
+Why: exchange order rejection on tick violation is a silent-grid-killer; exact ticks are
+also what §4.2 demands ("real tickSize/stepSize").
+Rejected: decimals-first derivation (lossy for odd/integer ticks); hardcoded decimals.
+
 ### 2026-10-07 · D30 [AUTO]: S5 template design — static interval + plain schema + separate validator
 
 What:
