@@ -9,9 +9,9 @@ export function normalizeOrderStatus(
   } else if (order.status === "canceled") {
     return "canceled";
   } else if (order.status === "closed") {
-    if (order.filled >= order.amount) {
+    if (order.filled! >= order.amount!) {
       return "filled";
-    } else if (order.filled < order.amount) {
+    } else if (order.filled! < order.amount!) {
       return "partially_filled";
     }
   }

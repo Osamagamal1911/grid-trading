@@ -22,22 +22,24 @@ const accountAssets: Normalize["accountAssets"] = {
 };
 
 const getLimitOrder: Normalize["getLimitOrder"] = {
-  request: (params) => [params.orderId, params.symbol],
+  // alphaGrid S10 (D48): route conditional-order lookups to the algo endpoint.
+  request: (params) =>
+    params.stop ? [params.orderId, params.symbol, { stop: true }] : [params.orderId, params.symbol],
   response: (order) => ({
-    exchangeOrderId: order.id,
+    exchangeOrderId: order.id!,
     clientOrderId: order.clientOrderId,
-    symbol: order.symbol,
+    symbol: order.symbol!,
     side: order.side as OrderSide,
-    quantity: order.amount,
-    quantityExecuted: order.filled,
-    volume: order.amount * order.price,
-    volumeExecuted: order.cost,
-    price: order.price, // could be undefined for market order, in case not filled yet?
+    quantity: order.amount!,
+    quantityExecuted: order.filled!,
+    volume: order.amount! * order.price!,
+    volumeExecuted: order.cost!,
+    price: order.price!, // could be undefined for market order, in case not filled yet?
     filledPrice: order.average || null,
     status: normalizeOrderStatus(order),
     fee: order.fee?.cost || 0,
-    createdAt: order.timestamp,
-    lastTradeTimestamp: order.lastTradeTimestamp,
+    createdAt: order.timestamp!,
+    lastTradeTimestamp: order.lastTradeTimestamp!,
   }),
 };
 
@@ -54,7 +56,7 @@ const placeOrder: Normalize["placeOrder"] = {
     return [params.symbol, orderType, params.side, params.quantity];
   },
   response: (order) => ({
-    orderId: order.id,
+    orderId: order.id!,
     clientOrderId: order.clientOrderId,
   }),
 };
@@ -66,7 +68,7 @@ const placeLimitOrder: Normalize["placeLimitOrder"] = {
       ? [params.symbol, params.side, params.quantity, params.price, { reduceOnly: true }]
       : [params.symbol, params.side, params.quantity, params.price],
   response: (order) => ({
-    orderId: order.id,
+    orderId: order.id!,
     clientOrderId: order.clientOrderId,
   }),
 };
@@ -78,7 +80,7 @@ const placeMarketOrder: Normalize["placeMarketOrder"] = {
       ? [params.symbol, params.side, params.quantity, undefined, { reduceOnly: true }]
       : [params.symbol, params.side, params.quantity],
   response: (order) => ({
-    orderId: order.id,
+    orderId: order.id!,
     clientOrderId: order.clientOrderId,
   }),
 };
@@ -110,15 +112,16 @@ const placeStopOrder: Normalize["placeStopOrder"] = {
     ];
   },
   response: (order) => ({
-    orderId: order.id,
+    orderId: order.id!,
     clientOrderId: order.clientOrderId,
   }),
 };
 
 const cancelLimitOrder: Normalize["cancelLimitOrder"] = {
-  request: (params) => [params.orderId, params.symbol],
+  // alphaGrid S10 (D48): algo-order cancels need the stop flag (regular endpoint 400s them).
+  request: (params) => (params.stop ? [params.orderId, params.symbol, { stop: true }] : [params.orderId, params.symbol]),
   response: (data) => ({
-    orderId: data.id,
+    orderId: data.id!,
   }),
 };
 
@@ -126,20 +129,21 @@ const getOpenOrders: Normalize["getOpenOrders"] = {
   request: (params) => [params.symbol],
   response: (orders) =>
     orders.map((order) => ({
-      exchangeOrderId: order.id,
-      clientOrderId: order.clientOrderId,
-      symbol: order.symbol,
+      exchangeOrderId: order.id!,
+      clientOrderId: order.clientOrderId!,
+      symbol: order.symbol!,
       side: order.side as OrderSide,
-      quantity: order.amount,
-      quantityExecuted: order.filled,
-      volume: order.amount * order.price,
-      volumeExecuted: order.cost,
-      price: order.price,
+      quantity: order.amount!,
+      quantityExecuted: order.filled!,
+      volume: order.amount! * order.price!,
+      volumeExecuted: order.cost!,
+      // Algo market stops carry no limit price — fall back to the trigger (D48).
+      price: order.price ?? order.stopPrice ?? 0,
       filledPrice: null,
       status: normalizeOrderStatus(order) as "open",
       fee: order.fee?.cost || 0,
-      createdAt: order.timestamp,
-      lastTradeTimestamp: order.lastTradeTimestamp,
+      createdAt: order.timestamp!,
+      lastTradeTimestamp: order.lastTradeTimestamp!,
     })),
 };
 
@@ -147,20 +151,20 @@ const getClosedOrders: Normalize["getClosedOrders"] = {
   request: (params) => [params.symbol],
   response: (orders) =>
     orders.map((order) => ({
-      exchangeOrderId: order.id,
-      clientOrderId: order.clientOrderId,
-      symbol: order.symbol,
+      exchangeOrderId: order.id!,
+      clientOrderId: order.clientOrderId!,
+      symbol: order.symbol!,
       side: order.side as OrderSide,
-      quantity: order.amount,
-      quantityExecuted: order.filled,
-      volume: order.amount * order.price,
-      volumeExecuted: order.cost,
-      price: order.price,
-      filledPrice: order.average || order.price, // assume that filled order must always contain `order.average`
+      quantity: order.amount!,
+      quantityExecuted: order.filled!,
+      volume: order.amount! * order.price!,
+      volumeExecuted: order.cost!,
+      price: order.price!,
+      filledPrice: order.average || order.price!, // assume that filled order must always contain `order.average`
       status: normalizeOrderStatus(order) as "filled" | "canceled",
       fee: order.fee?.cost || 0,
-      createdAt: order.timestamp,
-      lastTradeTimestamp: order.lastTradeTimestamp,
+      createdAt: order.timestamp!,
+      lastTradeTimestamp: order.lastTradeTimestamp!,
     })),
 };
 
@@ -187,7 +191,7 @@ const getTicker: Normalize["getTicker"] = {
 const getMarketPrice: Normalize["getMarketPrice"] = {
   request: (params) => [params.symbol],
   response: (ticker) => ({
-    symbol: ticker.symbol,
+    symbol: ticker.symbol!,
     price: ticker.last! || ticker.bid! || ticker.ask!,
     timestamp: ticker.timestamp!,
   }),
@@ -204,7 +208,7 @@ const getMarkPrice: Normalize["getMarkPrice"] = {
       throw new Error(`alphaGrid: mark price unavailable for ${ticker.symbol} (refusing last-price fallback).`);
     }
     return {
-      symbol: ticker.symbol,
+      symbol: ticker.symbol!,
       markPrice,
       timestamp: ticker.timestamp!,
     };
@@ -255,16 +259,16 @@ const watchOrders: Normalize["watchOrders"] = {
   request: (params) => [params.symbol],
   response: (orders) =>
     orders.map((order) => ({
-      exchangeOrderId: order.id,
-      clientOrderId: order.clientOrderId,
+      exchangeOrderId: order.id!,
+      clientOrderId: order.clientOrderId!,
       side: order.side as OrderSide,
-      quantity: order.amount,
-      price: order.price,
+      quantity: order.amount!,
+      price: order.price!,
       filledPrice: order.average || null,
       status: normalizeOrderStatus(order),
       fee: order.fee?.cost || 0,
-      createdAt: order.timestamp,
-      lastTradeTimestamp: order.lastTradeTimestamp,
+      createdAt: order.timestamp!,
+      lastTradeTimestamp: order.lastTradeTimestamp!,
     })),
 };
 

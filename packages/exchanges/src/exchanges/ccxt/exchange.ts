@@ -45,7 +45,6 @@ import type {
   IWatchCandlesResponse,
   IWatchOrdersRequest,
   IWatchOrdersResponse,
-  ExchangeCode,
   IWatchTradesRequest,
   IWatchTradesResponse,
   IOrderbook,
@@ -53,6 +52,7 @@ import type {
   ITrade,
 } from "@opentrader/types";
 import { pro, exchanges } from "ccxt";
+import { ExchangeCode } from "@opentrader/types";
 import type { Market, Exchange } from "ccxt";
 import type { IExchange, IExchangeCredentials } from "../../types/index.js";
 import { cache } from "../../cache.js";
@@ -98,7 +98,17 @@ export class CCXTExchange implements IExchange {
     this.ccxt.verbose = process.env.CCXT_VERBOSE === "true";
 
     if (this.isDemo) {
-      this.ccxt.setSandboxMode(true);
+      if (exchangeCode === ExchangeCode.BINANCE) {
+        // alphaGrid S10 (D48): ccxt ≥4.5 refuses setSandboxMode for futures (venue
+        // retired it) — map the documented test endpoints explicitly instead, mirroring
+        // what setSandboxMode did (apiBackup stash + test overlay + sandbox flag so
+        // sapi prep calls stay skipped). Testnet-only path; live untouched.
+        this.ccxt.urls["apiBackup"] = this.ccxt.urls["api"];
+        this.ccxt.urls["api"] = this.ccxt.extend(this.ccxt.urls["api"], this.ccxt.urls["test"]);
+        this.ccxt.options["sandboxMode"] = true;
+      } else {
+        this.ccxt.setSandboxMode(true);
+      }
     }
   }
 
@@ -164,7 +174,22 @@ export class CCXTExchange implements IExchange {
     const args = normalize.getOpenOrders.request(params);
     const data = await this.ccxt.fetchOpenOrders(...args);
 
-    return normalize.getOpenOrders.response(data);
+    // alphaGrid S10 (D48): Binance segregates conditional (algo) stops onto a separate
+    // endpoint — merge both so reconcile sees every resting order. Other venues keep
+    // the legacy single call (no extra failing request per tick).
+    if (this.exchangeCode !== ExchangeCode.BINANCE) {
+      return normalize.getOpenOrders.response(data);
+    }
+    let algoData: typeof data = [];
+    try {
+      algoData = await this.ccxt.fetchOpenOrders(params.symbol, undefined, undefined, { stop: true });
+    } catch {
+      // No algo support on this route: regular orders are the whole truth.
+    }
+    const normalized = normalize.getOpenOrders.response(data);
+    const normalizedAlgo = normalize.getOpenOrders.response(algoData);
+
+    return [...normalized, ...normalizedAlgo];
   }
 
   async getClosedOrders(params: IGetClosedOrdersRequest): Promise<IGetClosedOrdersResponse> {
@@ -227,7 +252,7 @@ export class CCXTExchange implements IExchange {
     const args = normalize.getSymbol.request(params);
     // method market() not typed by CCXT
     // const data: Market = await this.ccxt.market(...args);
-    const data: Market = markets[args[0]];
+    const data: Market = markets[args[0]!];
 
     return normalize.getSymbol.response(data, this.exchangeCode); // @todo refactor
   }

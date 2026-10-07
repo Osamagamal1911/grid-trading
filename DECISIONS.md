@@ -127,6 +127,10 @@ Rejected: a parallel registration mechanism.
 
 ## Session entries (append below; newest last)
 
+> Ordering note (2026-10-07): entries D24+ landed out of FILE order (anchor misfires
+> interleaved them); numbering D1..D49 is complete and is the ordering key. Do NOT
+> reorder or rewrite to "fix" it — append-only stands.
+
 ### 2026-10-07 · D17: Toolchain = user-local Node 22.12.0 + pnpm 10.12.1 (no sudo, no global mutation)
 
 What: Node installed from the official `linux-arm64` tarball into `~/.local/node-v22`
@@ -582,6 +586,46 @@ for auditability, never silently average.
 Rejected: NaN propagation (poisons downstream orders); silent clamping of bad config (masks
 operator error on real-money-adjacent code).
 
+### 2026-10-07 · D49 [AUTO]: S10 daemon liveness — WS 1008 guard + stale-pid note
+
+What:
+(a) Post-bump daemon died on boot: pro-Binance WS user-data stream closes with 1008 and
+ccxt's WS client throws from an event-emitter path no try/catch covers (the watcher's
+NetworkError handling never sees it). Root: spot user-data WS on retired testnet-vision
+hosts (testnet has no spot WS; futures WS hosts verified working with testnet keys, so this
+is the default-type=spot subscription dying, not a credential problem). Narrow guard in
+`app/src/api/up/daemon.ts` (OUR app layer, not shared libs): survive `NetworkError`s matching
+WS-close fingerprints (log + continue — polling watcher already runs in parallel and the
+strategy reconciles via REST); anything else exits loudly. Verified: daemon survives the
+3.5s 1008 loop indefinitely (was: dead in ~30s).
+(b) `up` refuses to start on a stale pid file after `kill -9` (no liveness check upstream):
+clear `~/.opentrader/pid` (equivalent of upstream `clearPid`) before restart; prefer
+graceful SIGTERM (triggers onStop flatten) over -9 except for the kill test itself.
+(c) `trade`/`stop` must run detached (`up -d`): pipe-close SIGPIPEs foreground daemons.
+(d) Left alone: a 19:47 `stop` that reported "already stopped" while the bot read enabled
+(minor upstream quirk, possibly a stale-read race; no funds at risk, state stayed clean).
+Full CLI cycle (trade/stop) verified working after the D47 transport fix.
+Why: (a) a daemon that dies on WS weather fails S10 outright; the guard is 8 lines, scoped
+to network-class, and changes no order/bot logic. (b–c) operator runbook facts.
+Rejected: disabling the WS watcher in channel code (upstream topology change for a problem
+scoped to testnet spot WS); leaving the crash (S10 impossible).
+
+### 2026-10-07 · D47 [AUTO]: S10 unblocked — tRPC transformer alignment (server + client link)
+
+What: `trade`/`stop` CLI calls 400d on every mutation. Root causes (both pre-existing
+upstream drift, verified live): (1) the tRPC ROUTER is created with superjson but the
+Fastify adapter registration omitted `transformer` → one-line fix in
+`packages/bot/src/server.ts`; (2) the CLI client passed `transformer` at the client root,
+which tRPC v11 ignores (moved to link level — the exact message in the pre-existing
+typecheck errors) → moved into `httpBatchLink` in `app/src/daemon-rpc.ts`. This also
+cleared 2 of the 4 pre-existing `app` typecheck errors (4 → 2). Verified: direct RPC +
+full `trade alphaGrid` CLI cycle now succeed ("Bot started successfully").
+Why: no bot can start/stop via CLI or dashboard without a working transport — M3
+impossible otherwise; both fixes align the three layers (router/adapter/client) that
+upstream left inconsistent, changing no procedure logic.
+Rejected: client-side-only or server-side-only fix (either alone still 400s); leaving
+the CLI broken and driving everything via curl (unusable for the human).
+
 ### 2026-10-07 · D46 [AUTO]: S9 sim-clock pinning + ruin/screen redesign (gap honesty)
 
 What:
@@ -620,3 +664,27 @@ Why: aborting the whole grid on outer-level negativity would idle the bot throug
 exact crash regimes it hunts; per-level viability mirrors what venues accept.
 Rejected: catching S4's throw and shrinking (exception-driven flow); weakening the
 symmetric builder (destabilizes a DONE step's tested contract).
+
+### 2026-10-07 · D48 [AUTO]: S10 algo routing + degrade-don't-brick + runner throw protocol
+
+What:
+(a) Binance retired conditional orders on `/fapi/v1/order` (−4120, algo API only) and ccxt
+4.4.91 predates the routing → bumped ccxt 4.4.91 → 4.5.85 (3 package.json pins) which routes
+futures stops/cancels/queries to `fapiPrivate*Algo*` automatically; verified live on testnet
+(place → visible in algo opens → cancel `{stop: true}`). Fixes: `gateio`→`gate` rename +
+4.5.85 nullable-type drift (`!` per repo style) in exchanges normalize.
+(b) Strategy tracks stop kind explicitly: `stop?: boolean` added to cancel/get-limit request
+types; reconcile/cancels pass it for stop-kind orders; `getOpenOrders` merges regular +
+algo books (Binance-gated); algo market-stop price falls back to stopPrice in normalize.
+(c) Exit-order placement failures degrade (warn-once flags `stopDownReason`/`tpUnplaceable`,
+retry next tick) instead of bricking the tick and discarding reconcile progress — the S10
+-4120 loop proved discard-on-error freezes all fills/TP/stops permanently.
+(d) Framework correction making (c) real: `StrategyRunner` fed async rejections OUTSIDE
+generators (plain `await` throw), so ALL in-strategy try/catch (ours and upstream's) was
+dead code. Now feeds via `generator.throw(err)` (standard protocol); uncaught behavior
+byte-identical. Test harness mirrors it exactly.
+Why: (a/b) venue reality as of 2026 — stops cannot exist otherwise; (c) a persistently
+failing placement must cost one layer, never the whole bot; (d) without it (c) is fiction.
+Rejected: raw signed-HTTP algo connector (reimplements venue routing ccxt maintains);
+magic cancel-retry (latency + masks); framework save-on-error (papers over partial state;
+transient failures self-heal via idempotent reconcile instead).

@@ -79,9 +79,15 @@ export class StrategyRunner<T extends IBotConfiguration> {
 
     for (; !item.done; ) {
       if (item.value instanceof Promise) {
-        const result = await item.value;
-
-        item = generator.next(result);
+        // Feed async rejections back INTO the generator (standard runner protocol):
+        // without generator.throw(), try/catch inside strategies is dead code and
+        // every exchange error bricks the tick (alphaGrid D48: degrade, don't brick).
+        // Strategies that don't catch behave exactly as before (throw propagates).
+        try {
+          item = generator.next(await item.value);
+        } catch (err) {
+          item = generator.throw(err);
+        }
       } else if (isEffect(item.value)) {
         const effect = item.value;
         const effectRunner = effectRunnerMap[effect.type];

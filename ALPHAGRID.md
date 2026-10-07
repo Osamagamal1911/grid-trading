@@ -167,6 +167,31 @@ needs the unrealized stop sized accordingly). Backtest YOUR coin/window before d
     blind-cancel others' orders); crash orphans recover by manual cancel + restart (D36).
 16. (S7/S8) Unclosable dust: TP/SL placement below stepSize throws (fix sizing); terminal-close
     dust remainder warns + clears so a stopping bot never hangs (D37a/D40c).
+
+## 9. Testnet validation (S10, 2026-10-07 — mechanics proven, 48h soak open)
+
+- Deployed via CLI on Binance futures testnet (AKEUSDT, manual ±1–3% grids, 200 AKE/level
+  ≈ $5.4–16 max notional, lev 1): grid draws exact, fills → direction lock → averaging
+  (long 400 @ 0.0272698) → TP sync (sell 400 @ 0.0280878, reduceOnly) → **Layer-1 algo stop
+  (sell 400 @ STOP 0.0163618, reduceOnly, MARK_PRICE) — all logged with exact values.**
+- **Kill test PASSED**: `kill -9` mid-position → algo stop + TP + grids all present on
+  testnet afterwards (Layer 1 survives process death — the key M3 criterion).
+- Graceful shutdown / manual stop: cancel-all (incl. algo stop via `{stop: true}` routing)
+  + reduceOnly market-close of the full position (observed 400-lot close on tape).
+- Venue realities baked in from this session: stops live on the Algo API only (−4120
+  otherwise; ccxt ≥4.5 required); testnet WS user-data is dead (daemon survives via guard,
+  polling covers sync); size entries ≥ minNotional/(1−stopPct/lev) or Layer 1 can't exist.
+- Dashboard UI is a private repo (not here): live per-bot state verified queryable in DB
+  (direction/fills/orders/TP/stop/geometry/cycles) + botLog tick stream — same data source.
+- OPEN: 48h+ soak wall-clock (human runs/observes); re-run kill test on a supervisor-stop
+  path (this session killed a healthy position — stop-hit/supervisor-terminate paths are
+  unit-covered, live-proven pending).
 17. (S8) Breach evaluation throttled to pollIntervalMs; re-sync runs every tick (D40a).
 18. (S8) No alert channel upstream — breaches log warn; external alerting is pre-live work.
 19. (S8) Futures market-stop quantity = BASE qty (stale quote-currency comment corrected — D39).
+20. (S10) Binance conditional stops exist ONLY on the Algo Order API (−4120 elsewhere);
+    ccxt ≥4.5 routes automatically; cancels/lookups need `{stop: true}` (D48, live-proven).
+21. (S10) Testnet spot WS is dead; daemon survives WS 1008s via a scoped guard while polling
+    covers sync (D49). Stale pid files block restarts after `kill -9` (clear + prefer SIGTERM).
+22. (S10) Manual-stop flatten and kill-survival proven live; supervisor/stop-hit terminate
+    paths are unit-covered, live-proven pending a 48h soak event.

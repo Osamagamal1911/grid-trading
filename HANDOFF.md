@@ -4,6 +4,110 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
 
 ---
 
+## Session 4+ — 2026-10-07 · muse-spark-1.3-free (OpenCode) · S4→S9 + S10 testnet validation (part 1)
+
+Full-build autonomy grant. S4, S5, S6, S7, S8, S9 DONE and committed; M1+M2 TAGGED;
+S10 mechanics proven live (kill test PASSED), 48h soak left for the human.
+
+### Completed this session
+
+- **S4 DONE** (`b6a2d587`): `packages/tools/src/alpha-grid/math.ts` — §4.2 single source of
+  truth (margin, unrealized ROI, LONG/SHORT TP/SL, ATR/manual spacing, grid levels,
+  tick/step floor-rounding via big.js) + 29 tests. `tools:test` 104/104. (D25–D29.)
+- **S5 DONE** (`a120a8fc`): `bot-templates/.../alpha-grid/` schema (all §4.1
+  fields/defaults/describes) + 96-combo matrix tests + validator + warnings + warmup math +
+  template registration (displayName "Alpha Grid", hidden=false, onInterval, static 3000).
+  `bot-templates:test` 206 → registry resolves; dashboard ZodObject gate green. (D30–D32.)
+- **S6 DONE** (`2c89eddd`): `indicators/.../atr.ts` (Wilder, delegates to vendored
+  `technicalindicators`, verified by source + hand fixture) + 8 tests. 23/23. (D33–D34.)
+- **S7 DONE** (`7d496054`): `strategy.ts` state machine (lock/average/TP-sync/trailing/
+  manual-stop/restart-reconcile) + market helpers + mock + 28 tests; framework gaps
+  (reduceOnly limit/market, setLeverage, getMarkPrice) closed additively. 234/234. (D35–D38.)
+- **S8 DONE** (`f6850e3d`): two-layer stop (L1 re-place + L2 throttled supervisor,
+  unrealized-only proven vs total-PnL, stop-hit precedence) + 13 tests + normalize
+  plumbing tests. 247/247. ALPHAGRID §3 written.
+- **S9 DONE** (`f14a299e`): MemoryExchange order-book sim (range-crossing, fees/slippage,
+  journal) + driver (live StrategyRunner, redeploy model, honesty gates) + AKEUSDT 1h
+  backtest: **−16.88%, 22.95% maxDD, 94.23% win (98/104), 6 stops ≈ −40.02% exchange-hit,
+  $5.11 fees, 0 liqs** → BACKTEST_AKEUSDT.md. Bugs the backtest caught and fixed: D42
+  (sub-min stops), D43 (dust levels), D44 (opposite-fill netting), D45 (viable grid),
+  D46 (sim-clock + ruin screens). (D41–D46.)
+- **Tags**: `alphaGrid-m1` (S1–S7 per D24 map), `alphaGrid-m2` (S9) — created, push at end.
+- **S10 live validation** (testnet, tiny size ~$5–16/lvl, lev 1): full CLI cycle works
+  (`trade`/`stop` after D47 tRPC fixes); grid/TP/**algo-stop placed with exact prices**;
+  **kill −9 mid-position → algo stop (reduceOnly, MARK_PRICE) + TP + grids all survived**;
+  graceful-shutdown flatten closed full 400-lot reduceOnly. Fixes from live fire: ccxt
+  4.4.91→4.5.85 (algo routing for −4120), adapter algo-awareness (demo URL mapping,
+  open-merge, `{stop:true}` fetch/cancel, price fallback), exit-placement degrade (D48),
+  `generator.throw` runner protocol fix, daemon WS-1008 liveness guard (D49), gateio→gate +
+  nullable-type drift. 30+ consecutive green ticks, zero post-fix errors. Testnet slate CLEAN.
+- Daemon left STOPPED (via `down` — pid was already stale-cleared); bot disabled in DB.
+
+### Files created / modified (this session; all committed except HANDOFF here)
+
+- Created: tools `alpha-grid/{math,math.test}.ts`, bot-templates `alpha-grid/{schema,schema.test,
+  alpha-grid,market,market.test,strategy,strategy.test,strategy-stop.test,strategy.test-utils}.ts`,
+  indicators `atr.ts/atr.test.ts`, backtesting `alpha-grid/{backtest-driver,backtest-report,
+  akeusdt-backtest.test}.ts` + `exchange/memory-exchange.test.ts`, exchanges
+  `order-params.test.ts`, types `get-mark-price.ts`, `scripts/fetch-klines.mjs`,
+  `BACKTEST_AKEUSDT.md`, backtesting/bot-templates `vitest.config.ts`.
+- Modified: types (reduceOnly ×3, triggerBasis, mark-price types, stop flags, cancel/get types),
+  exchanges (normalize ×N, IExchange, CCXTExchange, PaperExchange, constants gate),
+  backtesting MemoryExchange (sim), bot-processor strategy-runner (throw protocol),
+  bot server.ts (transformer) + package.json (superjson), app daemon-rpc (link transformer)
+  + daemon.ts (WS guard), bot-templates/bot package.json + tsconfigs (dep wiring),
+  STEPS/DECISIONS/ALPHAGRID/HANDOFF.
+- Local-only (gitignored, never committed): `binance-test-net`, `.env`, `dev.db`,
+  `exchanges.json5`, `config.json5`, `klines/AKEUSDT-1h.json`, `/tmp` observer scripts.
+
+### Test results (final, this session)
+
+- tools 106/106 · indicators 23/23 · exchanges 22/22 · bot-templates 253/253 ·
+  backtesting 9/9 (incl. full AKEUSDT run + gates) · bot-processor typecheck clean.
+- Typecheck: all 13 `packages/*` green; app 2 pre-existing (cli import-attr, command overload).
+- `bot:test` 2 beforeAll DB-fixture failures proven pre-existing (stash round-trip, identical).
+- Live: kill test PASSED, flatten PASSED, 30+ green ticks, testnet CLEAN (0/0/none).
+
+### In progress / next (ordered)
+
+1. Push branch + `alphaGrid-m1`/`alphaGrid-m2` tags (this session end).
+2. S10 REMAINS OPEN (human): 48h+ soak wall-clock on testnet with observation. Runbook:
+   per-shell env exports (HANDOFF S3) → `./bin/cli.sh up -d` → `./bin/cli.sh trade alphaGrid`
+   (tight manual grid in `config.json5` for fills) → watch DB state/botLog + testnet →
+   re-run kill test on a supervisor path if a stop-out occurs → findings to ALPHAGRID §9.
+   NOTE: daemon 186280 died unexplained post-detach (candidates: session-cleanup SIGTERM);
+   run soak under tmux/systemd + monitor. Daemon currently STOPPED, slate clean.
+3. After human M3 sign-off: PR `feature/alphaGrid → dev` (human approval required — HARD STOP:
+   no PR from build sessions). M4 live: OUT OF SCOPE (explicit human approval + live keys).
+
+### Blockers / open questions for the human
+
+- None blocking. Watch items: (a) 19:47 `stop` reported "already stopped" while bot read
+  enabled (minor upstream quirk, D49d — no impact); (b) DECISIONS.md D24+ file order is
+  scrambled from anchor misfires (numbering complete — do NOT "fix" by rewriting);
+  (c) testnet WS user-data is dead — daemon guard covers it, polling syncs;
+  (d) backtest says lev-1 auto loses −16.88% on this window (honest data, not a bug).
+
+### Traps for the next AI (must-read)
+
+- NEVER output secret values (session-stopping rule): assert presence/length only.
+- `tsc --build` (or per-package rebuild) REQUIRED after changing `packages/*` before
+  dependents see new exports (`/dts` staleness); moon serves CACHED failures — verify direct.
+- Fake timers: arm BEFORE setup ticks (backwards clock ⇒ throttle skips forever).
+- `edit` oldString must be UNIQUE — anchor failures have twice duplicated content; verify
+  with grep after every structural edit; NEVER "repair" DECISIONS order (append-only).
+- `pkill -f` matches your own command line (suicide); kill by PID.
+- `up` without `-d` dies on pipe-close; stale pid blocks restart (clear `~/.opentrader/pid`).
+- Upstream sync: `merge` (never rebase across the import merge); push ONLY origin/feature.
+- Do NOT re-verify testnet connectivity or re-run the backtest unless inputs changed.
+
+### Commit
+
+- `alphaGrid: S10 testnet hardening + validation` (all S10 code + docs), push
+  `origin/feature/alphaGrid` + tags. HANDOFF update included here.
+
+---
+
 ## Session 3 — 2026-10-07 · muse-spark-1.3-free (OpenCode) · S3 env credentials + testnet init/verify
 
 ### Completed this session
@@ -37,7 +141,6 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
   and reverted same session: it swallowed the legit `env-credentials*.ts` source files).
   Disclosure: a structure probe echoed the testnet key/secret into tool output once (D23) —
   testnet-scoped, local-only, never reproduced.
-  key/secret into tool output once (D23) — testnet-scoped, local-only, never reproduced.
 
 ### Files created / modified (this session)
 

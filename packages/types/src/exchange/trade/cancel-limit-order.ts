@@ -7,6 +7,11 @@ export type ICancelLimitOrderRequest = {
    * Order ID provided by the exchange
    */
   orderId: string;
+  /**
+   * alphaGrid S10 (D48): set for conditional (algo) orders on venues that
+   * segregate them (Binance futures) — routes lookup/cancel to the algo endpoint.
+   */
+  stop?: boolean;
 };
 
 export interface ICancelLimitOrderResponse {

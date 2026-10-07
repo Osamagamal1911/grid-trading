@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import fastifyCors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import superjson from "superjson";
 import { appRouter } from "@opentrader/trpc";
 import { createContext } from "./trpc.js";
 
@@ -43,6 +44,9 @@ export const createServer = (params: CreateServerOptions) => {
     trpcOptions: {
       router: appRouter,
       createContext,
+      // Must match the router's transformer (packages/trpc) and the CLI client
+      // (app/daemon-rpc): without this every RPC call 400s (S10 blocker, D47).
+      transformer: superjson,
     },
   });
 

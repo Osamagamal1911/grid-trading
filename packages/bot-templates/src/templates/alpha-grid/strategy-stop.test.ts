@@ -94,7 +94,7 @@ describe("Layer 1 — exchange-side stop", () => {
 
       expect(s.direction).toBe("long");
       expect(exchange.stopOrders.length).toBe(0); // skipped, not forced
-      expect(s.stopUnplaceable).toBe(true);
+      expect(s.stopDownReason).toBe("min-notional");
 
       // Supervisor still protects the unsupervised position.
       exchange.markPrice = 50;
@@ -114,13 +114,69 @@ describe("Layer 1 — exchange-side stop", () => {
     await runTick(exchange, settings, state, "start");
     exchange.fillOrder(buyIds(exchange)[0], 90);
     await runTick(exchange, settings, state);
-    expect((state as unknown as { stopUnplaceable: boolean }).stopUnplaceable).toBe(true);
+    expect((state as unknown as { stopDownReason: string }).stopDownReason).toBe("min-notional");
 
     exchange.symbol.minCost = null; // venue info changes; restart re-reads it
     await runTick(exchange, settings, state, "start");
-    const s = state as unknown as { stopUnplaceable: boolean };
-    expect(s.stopUnplaceable).toBe(false);
+    const s = state as unknown as { stopDownReason: string };
+    expect(s.stopDownReason).toBe(null);
     expect(exchange.stopOrders.length).toBe(1);
+  });
+
+  it("degrades (not bricks) when stop placement throws — retries, supervisor guards (D48)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      const exchange = new MockAlphaGridExchange();
+      exchange.failPlaceStop = new Error("venue exploded");
+      const settings = baseSettings();
+      const state: Record<string, unknown> = {};
+      await runTick(exchange, settings, state, "start");
+      exchange.fillOrder(buyIds(exchange)[0], 90);
+      // Tick SUCCEEDS despite the venue error: fill recorded, TP placed, flag set.
+      const { state: s } = await runTick(exchange, settings, state);
+      expect(s.direction).toBe("long");
+      expect(s.totalQty).toBe(1);
+      expect(s.stopDownReason).toBe("placement-failed");
+      expect(s.tpOrderId).not.toBe(null);
+
+      // Recovery: venue heals → stop placed, flag cleared, no duplicate TP.
+      exchange.failPlaceStop = null;
+      const tpCount = exchange.callsTo("placeLimitOrder").length;
+      await runTick(exchange, settings, state);
+      expect(exchange.stopOrders.length).toBe(1);
+      expect((s as unknown as { stopDownReason: null }).stopDownReason).toBe(null);
+      expect(exchange.callsTo("placeLimitOrder").length).toBe(tpCount); // TP untouched (no churn)
+
+      // And the degraded position still stops via supervisor on breach.
+      exchange.markPrice = 50;
+      vi.advanceTimersByTime(3000);
+      const { control } = await runTick(exchange, settings, state);
+      expect(control.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("TP placement failure degrades the TP only — stop still placed, tick succeeds (D48)", async () => {
+    const exchange = new MockAlphaGridExchange();
+    const settings = baseSettings();
+    const state: Record<string, unknown> = {};
+    await runTick(exchange, settings, state, "start");
+    exchange.failPlaceLimit = new Error("TP venue exploded");
+    exchange.fillOrder(buyIds(exchange)[0], 90);
+    // Grid fills record fine; TP placement fails → warn-flag, tick succeeds, stop placed.
+    const { state: s } = await runTick(exchange, settings, state);
+    expect(s.direction).toBe("long");
+    expect(s.tpUnplaceable).toBe(true);
+    expect(s.tpOrderId).toBe(null);
+    expect(exchange.stopOrders.length).toBe(1);
+
+    // Recovery: TP placed on the next tick, flag cleared.
+    exchange.failPlaceLimit = null;
+    await runTick(exchange, settings, state);
+    expect(s.tpUnplaceable).toBe(false);
+    expect(s.tpOrderId).not.toBe(null);
   });
 
   it("Layer-1-off still protects via supervisor (useExchangeStopOrder=false)", async () => {

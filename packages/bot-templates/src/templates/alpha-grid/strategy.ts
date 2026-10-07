@@ -59,7 +59,7 @@ export interface AlphaGridTrackedOrder {
 }
 
 export interface AlphaGridRuntimeState {
-  version: 3;
+  version: 4;
   initialized: boolean;
   marketId: string;
   tickSize: number;
@@ -80,8 +80,10 @@ export interface AlphaGridRuntimeState {
   tpOrderId: string | null;
   /** Layer-1 exchange-side stop order id (S8; null when disabled/absent). */
   stopOrderId: string | null;
-  /** True while the stop is unplaceable (sub-min-notional) — warn once per transition (D42). */
-  stopUnplaceable: boolean;
+  /** Why Layer 1 is down, if so: min-notional skip (D42) vs placement failure (D48). Warn per reason. */
+  stopDownReason: "min-notional" | "placement-failed" | null;
+  /** True while TP placement keeps failing — warn once per transition, position rides (D48). */
+  tpUnplaceable: boolean;
   /** Last supervisor evaluation, ms epoch (D30 throttle). */
   lastSupervisorRun: number;
   noStopLossAck: boolean;
@@ -94,7 +96,7 @@ type Yielded = Promise<unknown>;
 // back in, which no static type can express. Yields are always exchange promises.
 type StratGen<T = void> = Generator<Yielded, T, any>;
 
-const STATE_VERSION = 3;
+const STATE_VERSION = 4;
 
 function freshState(marketId: string): AlphaGridRuntimeState {
   return {
@@ -115,7 +117,8 @@ function freshState(marketId: string): AlphaGridRuntimeState {
     orders: [],
     tpOrderId: null,
     stopOrderId: null,
-    stopUnplaceable: false,
+    stopDownReason: null,
+    tpUnplaceable: false,
     lastSupervisorRun: 0,
     noStopLossAck: false,
     idleOutOfRange: false,
@@ -198,7 +201,8 @@ function* cancelTrackedOrders(
 ): StratGen {
   const targets = state.orders.filter((o) => predicate(o) && openIds.has(o.orderId));
   for (const target of targets) {
-    yield exchange.cancelLimitOrder({ symbol: marketId, orderId: target.orderId });
+    // Stops live on the algo endpoint (D48) — route explicitly, like lookups.
+    yield exchange.cancelLimitOrder({ symbol: marketId, orderId: target.orderId, stop: target.kind === "stop" });
   }
   untrackOrders(state, new Set(targets.map((t) => t.orderId)));
 }
@@ -262,7 +266,12 @@ function* reconcileOrders(
     }
     // Missing from open → resolve once via fetch. Account any remainder, then
     // drop only terminal orders (a still-open order here is a race — keep it).
-    const fetched: IGetLimitOrderResponse = yield exchange.getLimitOrder({ symbol: marketId, orderId: tracked.orderId });
+    // Stops resolve through the algo endpoint (D48).
+    const fetched: IGetLimitOrderResponse = yield exchange.getLimitOrder({
+      symbol: marketId,
+      orderId: tracked.orderId,
+      stop: tracked.kind === "stop",
+    });
     const delta = executionDelta(fetched.quantityExecuted, fetched.volumeExecuted, tracked, fetched.filledPrice);
     if (delta) {
       accountExecution(state, tracked, delta);
@@ -487,10 +496,25 @@ function* syncTakeProfitOrder(
     yield exchange.cancelLimitOrder({ symbol: marketId, orderId: existing.orderId });
     untrackOrders(state, new Set([existing.orderId]));
   }
-  const placed = yield exchange.placeLimitOrder({ symbol: marketId, side, quantity: tpQty, price: tpPrice, reduceOnly: true });
-  state.orders.push({ orderId: placed.orderId, kind: "tp", side, price: tpPrice, quantity: tpQty, filledSoFar: 0, filledValueSoFar: 0 });
-  state.tpOrderId = placed.orderId;
-  logger.info(`[AlphaGrid] TP synced: ${side} ${tpQty} @ ${tpPrice} (avg ${position.avgEntry}).`);
+  // D48: a failing TP placement must degrade (warn + ride under stop protection),
+  // never brick the tick and discard reconcile progress. Retried next tick.
+  try {
+    const placed = yield exchange.placeLimitOrder({ symbol: marketId, side, quantity: tpQty, price: tpPrice, reduceOnly: true });
+    state.orders.push({ orderId: placed.orderId, kind: "tp", side, price: tpPrice, quantity: tpQty, filledSoFar: 0, filledValueSoFar: 0 });
+    state.tpOrderId = placed.orderId;
+    if (state.tpUnplaceable) {
+      state.tpUnplaceable = false;
+      logger.info(`[AlphaGrid] TP placeable again — resumed.`);
+    }
+    logger.info(`[AlphaGrid] TP synced: ${side} ${tpQty} @ ${tpPrice} (avg ${position.avgEntry}).`);
+  } catch (err) {
+    if (!state.tpUnplaceable) {
+      state.tpUnplaceable = true;
+      logger.warn(`[AlphaGrid] TP placement failed (${(err as Error).message}) — riding without TP under stop protection; retrying.`);
+    } else {
+      logger.debug(`[AlphaGrid] TP placement still failing — riding without TP.`);
+    }
+  }
 }
 
 /**
@@ -525,10 +549,10 @@ function* syncStopOrder(
   const side = directionToExitSide(state.direction);
 
   // D42: a stop below exchange minimum is unplaceable (live venues reject it too).
-  // Skip loudly-once; the supervisor remains the protection. Existing stops stay.
+  // Skip loudly-once per reason; the supervisor remains the protection. Existing stops stay.
   if (state.minCost !== null && slQty * slPrice < state.minCost) {
-    if (!state.stopUnplaceable) {
-      state.stopUnplaceable = true;
+    if (state.stopDownReason !== "min-notional") {
+      state.stopDownReason = "min-notional";
       logger.warn(
         `[AlphaGrid] Layer-1 stop unplaceable (notional ${slQty * slPrice} < minimum ${state.minCost}) — supervisor-only protection. Raise volumePerLevel (need ≥ minNotional / (1 − stopPct/(100×lev))).`,
       );
@@ -537,8 +561,8 @@ function* syncStopOrder(
     }
     return;
   }
-  if (state.stopUnplaceable) {
-    state.stopUnplaceable = false;
+  if (state.stopDownReason === "min-notional") {
+    state.stopDownReason = null;
     logger.info(`[AlphaGrid] Layer-1 stop placeable again — resuming exchange-side protection.`);
   }
 
@@ -557,22 +581,37 @@ function* syncStopOrder(
   if (matches) return; // in sync — no churn.
 
   if (existing) {
-    yield exchange.cancelLimitOrder({ symbol: marketId, orderId: existing.orderId });
+    yield exchange.cancelLimitOrder({ symbol: marketId, orderId: existing.orderId, stop: true });
     untrackOrders(state, new Set([existing.orderId]));
   }
-  const placed = yield exchange.placeStopOrder({
-    type: settings.stopOrderType,
-    symbol: marketId,
-    side,
-    quantity: slQty,
-    stopPrice: slPrice,
-    price: limitPrice,
-    reduceOnly: true,
-    triggerBasis: "mark",
-  });
-  state.orders.push({ orderId: placed.orderId, kind: "stop", side, price: slPrice, quantity: slQty, limitPrice, filledSoFar: 0, filledValueSoFar: 0 });
-  state.stopOrderId = placed.orderId;
-  logger.info(`[AlphaGrid] Stop synced (L1): ${side} ${slQty} @ ${slPrice} [${settings.stopOrderType}/mark].`);
+  // D48: a failing stop placement must degrade to supervisor-only (warn + continue),
+  // never brick the tick and discard reconcile progress. Retried next tick.
+  try {
+    const placed = yield exchange.placeStopOrder({
+      type: settings.stopOrderType,
+      symbol: marketId,
+      side,
+      quantity: slQty,
+      stopPrice: slPrice,
+      price: limitPrice,
+      reduceOnly: true,
+      triggerBasis: "mark",
+    });
+    state.orders.push({ orderId: placed.orderId, kind: "stop", side, price: slPrice, quantity: slQty, limitPrice, filledSoFar: 0, filledValueSoFar: 0 });
+    state.stopOrderId = placed.orderId;
+    if (state.stopDownReason !== null) {
+      state.stopDownReason = null;
+      logger.info(`[AlphaGrid] Layer-1 stop placeable again — resuming exchange-side protection.`);
+    }
+    logger.info(`[AlphaGrid] Stop synced (L1): ${side} ${slQty} @ ${slPrice} [${settings.stopOrderType}/mark].`);
+  } catch (err) {
+    if (state.stopDownReason !== "placement-failed") {
+      state.stopDownReason = "placement-failed";
+      logger.warn(`[AlphaGrid] Layer-1 stop placement failed (${(err as Error).message}) — supervisor-only protection; retrying.`);
+    } else {
+      logger.debug(`[AlphaGrid] Layer-1 stop placement still failing — supervisor-only.`);
+    }
+  }
 }
 
 /**

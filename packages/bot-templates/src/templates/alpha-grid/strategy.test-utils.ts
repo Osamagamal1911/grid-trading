@@ -54,6 +54,10 @@ export class MockAlphaGridExchange implements IExchange {
   calls: { method: string; args: unknown }[] = [];
   setLeverageCalls: { symbol: string; leverage: number }[] = [];
   reduceOnlyFlags: { method: string; value: boolean | undefined }[] = [];
+  /** Failure injection (persistent until cleared): placement degrades per D48. */
+  failPlaceLimit: Error | null = null;
+  failPlaceStop: Error | null = null;
+  failPlaceMarket: Error | null = null;
   private seq = 0;
 
   private log(method: string, args: unknown): void {
@@ -136,6 +140,7 @@ export class MockAlphaGridExchange implements IExchange {
   async placeLimitOrder(params: IPlaceLimitOrderRequest): Promise<IPlaceLimitOrderResponse> {
     this.log("placeLimitOrder", params);
     this.reduceOnlyFlags.push({ method: "placeLimitOrder", value: params.reduceOnly });
+    if (this.failPlaceLimit) throw this.failPlaceLimit;
     this.seq += 1;
     const orderId = `mock-limit-${this.seq}`;
     this.openOrders.set(orderId, {
@@ -160,6 +165,7 @@ export class MockAlphaGridExchange implements IExchange {
   async placeMarketOrder(params: IPlaceMarketOrderRequest): Promise<IPlaceMarketOrderResponse> {
     this.log("placeMarketOrder", params);
     this.reduceOnlyFlags.push({ method: "placeMarketOrder", value: params.reduceOnly });
+    if (this.failPlaceMarket) throw this.failPlaceMarket;
     this.seq += 1;
     return { orderId: `mock-market-${this.seq}` };
   }
@@ -183,6 +189,7 @@ export class MockAlphaGridExchange implements IExchange {
   }): Promise<IPlaceStopOrderResponse> {
     this.log("placeStopOrder", params);
     this.reduceOnlyFlags.push({ method: "placeStopOrder", value: params.reduceOnly });
+    if (this.failPlaceStop) throw this.failPlaceStop;
     this.seq += 1;
     const orderId = `mock-stop-${this.seq}`;
     this.stopOrders.push({ orderId, params: { ...params } });
@@ -372,12 +379,17 @@ export function makeCtx(
 }
 
 export async function drain(gen: Generator<Promise<unknown>, void, unknown>): Promise<void> {
+  // Mirrors StrategyRunner.runTemplate exactly (rejections fed back via throw).
   let item = gen.next();
   while (!item.done) {
     if (!(item.value instanceof Promise)) {
       throw new Error("strategy yielded a non-promise effect (only exchange promises allowed)");
     }
-    item = gen.next(await item.value);
+    try {
+      item = gen.next(await item.value);
+    } catch (err) {
+      item = gen.throw(err);
+    }
   }
 }
 

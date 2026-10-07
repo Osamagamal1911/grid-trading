@@ -208,6 +208,10 @@ Acceptance criteria:
 - [ ] Findings appended to ALPHAGRID.md (recommended settings per volatility regime).
 
 Status: TODO (out of scope for build sessions; human runs it).
+PARTIAL 2026-10-07 (session 4+): deploy mechanics + kill test DONE on Binance testnet
+(grid/TP/algo-stop exact, kill −9 → stop survives, graceful flatten closes full size,
+DB state + tick stream verified; D47–D49 venue fixes). REMAINING (human): 48h+ soak
+wall-clock with dashboard observation. Daemon left STOPPED, testnet slate CLEAN.
 
 ---
 

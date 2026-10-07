@@ -10,10 +10,13 @@ export const createDaemonRpcClient = () => {
   const DAEMON_URL = `http://${host}:${port}/api/trpc`;
 
   return createTRPCProxyClient<typeof appRouter>({
-    transformer: superjson,
     links: [
       httpBatchLink({
         url: DAEMON_URL,
+        // v11: transformer lives on the link (client-root is ignored AND a type
+        // error). Without this the client sends un-enveloped input and every
+        // mutation 400s (S10 blocker, D47).
+        transformer: superjson,
         headers: () => ({
           Authorization: process.env.ADMIN_PASSWORD,
         }),
