@@ -8,6 +8,10 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
 
 ### Completed this session
 
+- (all previous items stand; branch pushed to `origin` as `feature/alphaGrid` ✅)
+- Fixed GitHub email-privacy push rejection: repo-local noreply identity + rebuilt the 3 local
+  commits via `commit-tree` (trees byte-identical, verified). See DECISIONS.md D16.
+
 - Read the full build prompt (spec) + inspected upstream OpenTrader `dev` (@ `8b8e245`)
   read-only in `/tmp/opencode/opentrader` (templates, BotTemplate/TBotContext types,
   `IPlaceStopOrderRequest`, `IExchange`, `bot-control.ts`, indicators, tools/grid,
@@ -63,6 +67,9 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
 - Do NOT commit to `master`; ALL work on `feature/alphaGrid`.
 - Do NOT stage: `exchanges.json5`, `.env`, `*.key`, `*.pem`, sqlite/db files, `node_modules/`,
   build artifacts — check `git status` + `git diff --cached` before every commit.
+- Git identity: repo-local noreply email is configured (D16). NEVER `rebase --rebase-merges`
+  across the S1 import merge — it replays ~1500 upstream commits. For identity-only rewrites of
+  OUR commits use `git commit-tree` plumbing (recipe in shell history / D16).
 - Do NOT trust `getMarketPrice().price` as mark price (D9), do NOT assume `placeStopOrder`
   supports `reduceOnly` today (D10), do NOT expect `MemoryExchange`/`PaperExchange` stops to
   work (D11/D12) — each has a planned step.

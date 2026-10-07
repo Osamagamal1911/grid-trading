@@ -127,6 +127,17 @@ Rejected: a parallel registration mechanism.
 
 ## Session entries (append below; newest last)
 
+### 2026-10-07 · D16: Repo-local git identity = noreply email (privacy block workaround)
+
+What: `git config` (repo-local, NOT global) set to name `Osamagamal1911` + email
+`73962760+Osamagamal1911@users.noreply.github.com`; the 3 bootstrap commits were rebuilt with
+`git commit-tree` (same trees/parents/messages/dates, new identity) because GitHub's "block
+pushes exposing my email" rejects ANY pushed commit carrying `g.osama1553@gmail.com`.
+Why plumbing (`commit-tree` + `reset --hard`) and NOT `rebase`: the import merge embeds ~1500
+upstream commits — `rebase --rebase-merges` tried to replay all of upstream history and hit a
+historic conflict (aborted cleanly, no damage). Never rebase across the import merge.
+Rejected: disabling GitHub's email-privacy block; rewriting upstream history.
+
 ### 2026-10-07 · D15: Upstream code lives INSIDE grid-trading (S1-Q1, human-decided)
 
 What: human chose "Import tree into grid-trading": OpenTrader `dev` is merged into this repo
