@@ -9,6 +9,7 @@
 #   4. moon binary postinstall workaround (pnpm ignores build scripts; see DECISIONS.md D17)
 #   5. tsc --build for packages/* (/dts project-reference artifacts typecheck needs)
 #   6. prisma migrate (local dev.db; creates gitignored .env from .env.example if missing)
+#   7. app build (dist/ for bin/cli.sh — gitignored, absent on fresh clones)
 #
 # Idempotent: safe to re-run. Skips every step whose result is already present.
 # Usage: ./scripts/setup.sh   (run from the repo root)
@@ -96,6 +97,13 @@ else
 fi
 echo "setup.sh: prisma migrate ..."
 ./node_modules/.bin/moon run prisma:migrate 2>&1 | tail -n 3
+
+# --- 7. app build (dist/ the CLI runs from; gitignored build output) --------
+# bin/cli.sh executes app/dist/cli.mjs, which does not exist on a fresh clone.
+# tsup bundles without type-gating, so the 2 pre-existing app typecheck errors
+# do not block it (D18).
+echo "setup.sh: app build ..."
+./node_modules/.bin/moon run app:build 2>&1 | tail -n 2
 
 echo ""
 echo "setup.sh: DONE — node $(node --version), pnpm $(pnpm --version)"
