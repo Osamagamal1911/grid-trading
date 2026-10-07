@@ -82,7 +82,9 @@ Acceptance criteria:
       rounding to tick/step sizes, zero/edge inputs. All green.
 - [ ] Module has docstring header (what/why/key formulas). No `exchange.ccxt` usage.
 
-Status: TODO.
+Status: DONE (`packages/tools/src/alpha-grid/math.ts` + 29 unit tests green via `grid/index.ts`
+export; SHORT signs, averaging, tick-floor rounding, zero/edge all covered; TP/SL prices anchor
+back to exactly ±tpPct/∓stopLossPct ROI — see DECISIONS.md D25–D29).
 
 ## S5 — Settings schema + template registration (M1, §4.1/§4.1b)
 
@@ -208,3 +210,5 @@ Status: TODO (out of scope for build sessions; human runs it).
   `exchanges` typecheck clean; `app` still exactly the 4 pre-existing errors. Project initialized:
   local `.env` (gitignored) + `prisma:migrate` ✅ (dev.db seeded). Testnet read-only verified:
   futures balance via S3 env path ✅ (spot-vision -2015 expected — futures-testnet keys).
+- 2026-10-07: S4 DONE (session 4+, muse-spark). `packages/tools/src/alpha-grid/math.ts`
+  (D25–D29); 29 new tests, `tools:test` 104/104 (21 files); typecheck + lint clean; no ccxt.

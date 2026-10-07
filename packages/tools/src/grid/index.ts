@@ -1,5 +1,6 @@
 export * from "./calcGridLines.js";
 export * from "./calcGridLinesWithPriceFilter.js";
+export * from "../alpha-grid/math.js";
 export * from "./calcGridStepSize.js";
 export * from "./calculateInvestment.js";
 export * from "./computeGridLevelsFromCurrentAssetPrice.js";

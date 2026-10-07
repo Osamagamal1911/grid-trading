@@ -91,3 +91,8 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
 4. (bootstrap) Backtest mark-price approximation = candle range-crossing (D11) — pending S9.
 5. (bootstrap) Paper simulator cannot validate Layer 1 (D12) — M3 kill-test needs Binance testnet.
 6. (more added as S3–S10 land)
+7. (S4) Manual-mode grid spacing = (high−low)/(2×nLevels) centered at (high+low)/2 (D27) —
+   spec gives the level formulas but not the spacing derivation; outer levels coincide with range edges.
+8. (S4) All exchange prices floor to tick multiples, quantities to step multiples (D26/D29);
+   max deviation one tick on triggers; supervisor re-syncs from exact values.
+9. (S4) Zero position → ROI 0%; empty fills → FLAT zeros; mixed-side fills and bad config throw (D28).

@@ -253,3 +253,73 @@ Why: spec §3 forbids file/DB secret storage; env-only code + ignored local file
 the letter (audit-clean repo) and the practical need (testnet runs without pasting secrets).
 Rejected: reading the file from committed code (reintroduces file-based secrets); committing an
 `.env` with the values (same violation); deleting the human's file (their property, needed for runs).
+
+### 2026-10-07 · D29 [AUTO]: Uniform round-down stands, even for LONG stops (≤1-tick bound)
+
+What: considered side-aware rounding (LONG SL rounded UP toward entry = earlier trigger).
+Kept uniform floor-everything (D26): max deviation is ONE tick on the exchange trigger price,
+Layer 2 (supervisor) re-syncs from EXACT unrounded values, and uniform flooring is simpler to
+audit than 4 directional branches in safety-critical code. TP limits: flooring moves LONG TPs
+one tick nearer (earlier fill) and SHORT TPs one tick farther — both ≤1 tick.
+Why: predictability + auditability beat a ≤1-tick trigger refinement the supervisor already
+covers; every extra branch in stop math is a place to be wrong with real money.
+Rejected: side-aware rounding (marginal gain, 4× branch surface in the most critical functions).
+
+### 2026-10-07 · D24 [AUTO]: Milestone tags follow the explicit map (m1 at S7, m2 at S9)
+
+What: STEPS.md contains two statements about S8: the milestone map ("M1 = S1–S7 · M2 = S8–S9")
+vs S8's section title "(M1+M3)" and S9's "tag alphaGrid-m1 (on S8 green)". The explicit map wins:
+tag `alphaGrid-m1` when S7 goes green (M1 = strategy + credentials complete), tag `alphaGrid-m2`
+when S9 goes green (M2 = backtest complete). S8's title label is treated as a stale copy of an
+earlier plan; no criteria text changes, only tag timing.
+Why: the map is the single unambiguous composition rule; S7 is the last strategy-construction
+step, S8/S9 are validation steps — tagging m1 at S7 matches "M1: Strategy + safe credentials".
+Rejected: tagging m1 at S8 (contradicts the map); editing BUILD_PROMPT (spec has no S-steps —
+this ambiguity lives in our plan file, not the spec).
+
+### 2026-10-07 · D25 [AUTO]: S4 math module lives in `packages/tools/src/alpha-grid/`
+
+What: new subdir `alpha-grid/` with `math.ts` + `math.test.ts`, exported through
+`tools/src/grid/index.ts` (same `export *` convention). Consumers: live strategy (bot-templates/
+bot-processor) and backtest (backtesting package) — ALL already depend on `@opentrader/tools`,
+so no package.json changes anywhere.
+Why: spec §4.2 demands one module used by live AND backtest; tools is the only package both
+sides already share; own subdir keeps it additive and avoids touching existing grid helpers (D8).
+Rejected: new package (dependency wiring for zero benefit); placing in bot-templates (backtester
+doesn't depend on it — would invert the dependency direction).
+
+### 2026-10-07 · D26 [AUTO]: Rounding = floor-to-tick-multiple via big.js (not decimals truncation)
+
+What: `roundPriceToTick(price, tickSize)` / `roundQuantityToStep(qty, stepSize)` compute
+`floor(value / size) * size` in exact decimal arithmetic (big.js, already a tools dep) and return
+numbers. Direction is ALWAYS down (never round up: rounding an entry/TP/SL price up could push
+an order outside the intended level or above available margin).
+Why: spec §4.2 says "real tickSize/stepSize …, never a hardcoded decimal count" — decimal-count
+truncation (`filterPrice`, which stays untouched for spot flows) is lossy for non-power-of-10
+ticks and returns strings; true tick math is exact and directly matches the spec wording.
+S7 feeds real tick/step from market data at the boundary (CCXT precision → tick conversion there).
+Rejected: reusing `filterPrice`/`filterQuantity` (decimals-based, string-typed, wrong tool for
+futures ticks); native floats (binary error on altcoin dust prices); round-half-up (unsafe side).
+
+### 2026-10-07 · D27 [AUTO]: Manual-mode spacing derivation (spec-silent, assumption #7)
+
+What: `manualLevelSpacing(high, low, nLevels) = (high − low) / (2 × nLevels)`; grid centered at
+`(high + low) / 2`; `buyLevel[i] = center − i × spacing`, `sellLevel[i] = center + i × spacing`
+(`i = 1..nLevels`), each tick-rounded. ATR mode: `levelSpacing = atrMultiplier × ATR` (absolute),
+then the same builder. So `gridTop = sellLevel[nLevels] ≈ high`, `gridBottom ≈ low` in manual mode.
+Why: the only symmetric derivation that honors both the spec's level formulas AND makes the
+manual range edges coincide with the outermost levels; recorded in ALPHAGRID.md assumptions.
+Rejected: `(high−low)/nLevels` per side (grid would span 2× the requested range); anchoring at
+low (asymmetric, breaks the LONG/SHORT mirror the state machine assumes).
+
+### 2026-10-07 · D28 [AUTO]: S4 edge semantics — quiet on normal empties, loud on violations
+
+What: zero position (`totalQty = 0` / `marginUsed = 0`) → `unrealizedROI% = 0`; empty `fills[]` →
+`{ avgEntry: 0, totalQty: 0 }` (FLAT is a normal state, not an error); mixed-side fills,
+non-finite inputs, `leverage ≤ 0`, `nLevels < 1`, `spacing ≤ 0`, `high ≤ low`, negative
+prices/quantities → throw `Error` with a naming message.
+Why: the S7 poll runs every 3s on possibly-FLAT state — throwing on empty would turn every idle
+tick into an exception; invariant violations (mixed sides in a one-way position) must fail loud
+for auditability, never silently average.
+Rejected: NaN propagation (poisons downstream orders); silent clamping of bad config (masks
+operator error on real-money-adjacent code).
