@@ -3,10 +3,63 @@
 > Status: SKELETON (bootstrap session 2026-10-07). Sections fill in as S3–S10 land.
 > Spec source of truth: BUILD_PROMPT.md. Assumptions list lives at the bottom.
 
-## 1. What alphaGrid is
+## 1. What alphaGrid is + fresh-machine runbook
 
-(TBD — one paragraph: Binance USD-M futures grid with unrealized-PnL stop, ATR spacing,
-pump-capture trailing. Filled in S5/S7.)
+alphaGrid is a Binance USD-M **futures** grid bot: ATR-adaptive (or fixed manual) grid,
+first-fill direction lock, averaging with a single ROI take-profit, pump-capture trailing,
+and a **two-layer stop on unrealized PnL only** (exchange-side stop + supervisor poll).
+Testnet-first, env-only secrets, one position cycle per symbol.
+
+### Runbook: clone → running testnet bot (no tribal knowledge)
+
+Prerequisites: `git`, `curl`, internet. No sudo, no Docker, no global installs.
+(Replaces the S1 manual toolchain notes; automated by `scripts/setup.sh`.)
+
+```bash
+# 0. Clone (all work lives on feature/alphaGrid — never dev/main/master)
+git clone https://github.com/Osamagamal1911/grid-trading.git
+cd grid-trading
+git checkout feature/alphaGrid
+
+# 1. Toolchain + deps + build + local DB (idempotent, ~2–5 min first run)
+./scripts/setup.sh
+export PATH="$HOME/.local/node-v22/bin:$PATH"   # every new shell (or add to .bashrc)
+
+# 2. Testnet keys (human, 2 min, testnet ONLY — never mainnet keys here)
+#    Mint at testnet.binancefuture.com → API Management → Generate HMAC API Key
+#    (trading permission; futures testnet needs no IP whitelist).
+#    Values below stay in YOUR shell only — never in files, chat, or commits.
+export BINANCE_API_KEY="<paste-testnet-key>"
+export BINANCE_API_SECRET="<paste-testnet-secret>"
+
+# 3. Local configs from samples (both gitignored; samples carry placeholders only)
+cp config.alphagrid.sample.json5 config.json5       # tune volumePerLevel for YOUR coin
+cp exchanges.alphagrid.sample.json5 exchanges.json5 # TESTNET entry, isDemoAccount: true
+
+# 4. Boot daemon (detached: survives shell exit; foreground `up` dies on pipe-close)
+./bin/cli.sh up -d
+
+# 5. Deploy (creates/updates the TESTNET account with BLANK secrets + starts the bot)
+./bin/cli.sh trade alphaGrid            # expect: "Bot ... started succesfully"
+
+# 6. Operate
+./bin/cli.sh stop                        # manual stop: cancel-all + reduceOnly close
+./bin/cli.sh down                        # stop the daemon (SIGTERM → graceful)
+./bin/cli.sh down --force                # last resort: SIGKILL (then clear ~/.opentrader/pid)
+```
+
+Watch it work (dashboard UI is a private repo — same data sources instead):
+
+- DB bot state: `packages/prisma` → query `bot` row (`direction/fills/orders/tpOrderId/
+  stopOrderId/cycleCount`) + `botLog` tick stream (see HANDOFF S10 for the exact queries).
+- Testnet venue truth: open orders / positions on testnet.binancefuture.com → Futures
+  wallet → Positions, or the read-only observer pattern in HANDOFF S10.
+- Daemon log: `~/.opentrader/log.log` (`[AlphaGrid] ...` lines: fills, TP/STOP syncs,
+  trailing shifts, supervisor actions).
+
+What `setup.sh` does NOT do: fetch klines (only needed for backtests:
+`node scripts/fetch-klines.mjs AKEUSDT 1h <START_ISO> klines/AKEUSDT-1h.json`),
+mint keys (human, step 2), choose sizing (edit `config.json5`), or run the 48h soak (S10).
 
 ## 2. How it works
 
@@ -92,8 +145,8 @@ reproduced: averaging concentrates size into losers. Full report: BACKTEST_AKEUS
 
 | Regime | leverage | nLevels | atrMultiplier | tpPct | stopLossPct | notes |
 |---|---|---|---|---|---|---|
-| Calm range (untested) | 1–2 | 8 | 0.5 | 3.0 | 40.0 | Defaults; validate on data first |
-| High-volatility Alpha listing (M2-measured) | 1 | 8 | 0.5 | 3.0 | 40.0 | Loses to bleed at lev 1 — see above |
+| Calm range (untested) | 1–2 | 8 | 0.5 | 3.0 | 20.0 | Defaults; validate on data first |
+| High-volatility Alpha listing (M2-measured at 40%) | 1 | 8 | 0.5 | 3.0 | 40.0 | Loses to bleed at lev 1 — see above |
 | Pump-capture (LOBSTERUSDT 2026-10-07: +52.46% in ~8h) | 10, isolated | 6 | trailing on | n/a (TP rode) | unrealized stop as net | Profit came from the leveraged directional move + trailing, NOT oscillation |
 
 Conservative defaults first; leverage is the dominant risk knob (a 10x LOBSTER-style run

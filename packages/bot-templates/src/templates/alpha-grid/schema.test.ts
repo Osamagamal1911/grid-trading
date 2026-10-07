@@ -83,7 +83,7 @@ describe("spec defaults (§4.1)", () => {
       atrTimeframe: "1h",
       volumePerLevel: 0.5,
       tpPct: 3.0,
-      stopLossPct: 40.0,
+      stopLossPct: 20.0,
       stopOrderType: "market",
       leverage: 1,
       pollIntervalMs: 3000,

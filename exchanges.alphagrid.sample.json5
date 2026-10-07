@@ -1,0 +1,15 @@
+{
+  // alphaGrid TESTNET account (copy to exchanges.json5). Secrets are PLACEHOLDERS:
+  // with BINANCE_API_KEY / BINANCE_API_SECRET exported, the CLI stores BLANK secrets
+  // in DB and the runtime substitutes env values in-memory (never persisted — S3).
+  // NEVER put real keys here. Mint testnet keys at testnet.binancefuture.com
+  // (API Management → HMAC, trading permission; testnet needs no IP whitelist).
+  TESTNET: {
+    name: "Binance Testnet (alphaGrid)",
+    apiKey: "from-env-BINANCE_API_KEY",
+    secretKey: "from-env-BINANCE_API_SECRET",
+    password: "",
+    exchangeCode: "BINANCE",
+    isDemoAccount: true, // sandbox mode → testnet URLs (never mainnet)
+  },
+}

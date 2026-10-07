@@ -688,3 +688,41 @@ failing placement must cost one layer, never the whole bot; (d) without it (c) i
 Rejected: raw signed-HTTP algo connector (reimplements venue routing ccxt maintains);
 magic cancel-retry (latency + masks); framework save-on-error (papers over partial state;
 transient failures self-heal via idempotent reconcile instead).
+
+### 2026-10-07 · D50 [HUMAN]: Default stopLossPct 40 → 20 (human's explicit call)
+
+What: human authorized exactly one spec change this session: the `stopLossPct` schema default
+40.0 → 20.0. Applied to: zod schema default (`schema.ts`), BUILD_PROMPT.md §4.1 table,
+S5 defaults test expectation, ALPHAGRID calm-regime row. Deliberately UNCHANGED: the M2
+backtest record (40% run stays as history + committed M2 runner test keeps explicit 40),
+BUILD_PROMPT §5 M2 criteria (still specify 40 — the milestone as accepted), all strategy
+unit tests (explicit `stopLossPct: 40` configs remain valid coverage of 40% behavior).
+Rationale per human: tighter default favors capital preservation on small per-coin sizes.
+Why logged as HUMAN not AUTO: spec changes require human approval — this is the receipt.
+
+### 2026-10-07 · D51 [AUTO]: Part A portability — setup.sh, samples, no new Docker
+
+What:
+(a) `scripts/setup.sh` (executable, idempotent, no sudo): user-local Node 22.12.0
+(x86_64 + arm64 via `uname -m`, tarball cached in /tmp/opencode) + pnpm 10.12.1, each
+skipped when the exact version is present; `pnpm install`; moon postinstall workaround
+(glob-tolerant `@moonrepo+cli@*` lookup, fatal error if the layout ever changes);
+`tsc --build` over the 13 green packages ONLY (app excluded: 2 pre-existing errors;
+pro/* excluded: private submodule); `.env` created from `.env.example` iff missing
+(never overwritten — empty BINANCE_* placeholders are loader-safe); `prisma:migrate`.
+(b) `config.alphagrid.sample.json5` + `exchanges.alphagrid.sample.json5` (new names —
+no upstream-sample churn): 20%-default settings + sizing-rule comments + TESTNET demo
+entry with placeholder secrets. Runbook lives in ALPHAGRID.md §1 (fills the TBD).
+(c) NO new Dockerfile/compose: the grant demands a *built-and-booted* bar for Docker,
+and the repo already ships Docker files for the app; a second untested container
+definition adds maintenance without portability gain. Revisit only if the human wants
+a verified image (then it must pass the same fresh-clone gate).
+(d) `.gitignore` audit: every local secret/state covered (binance-test-net, .env,
+config/exchanges.json5, dev.db/sqlite, klines/, logs, dist/build, pid lives outside
+the repo in ~/.opentrader). Nothing to add.
+Why: (a/b) fresh-clone-to-running-bot from documented commands alone kills tribal
+knowledge (S1's manual toolchain becomes one idempotent script); (c) untested Docker
+is negative value; (d) audit before the clone test, not after.
+Rejected: global `apt`/npm installs (needs sudo, breaks reproducibility); copying
+upstream samples over (loses alphaGrid-specific sizing rules); new Dockerfiles without
+a build+boot gate (explicitly barred by the grant).

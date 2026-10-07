@@ -74,7 +74,7 @@ assume one-way position mode.
 | atrTimeframe | string | "1h" | Timeframe for ATR |
 | volumePerLevel | number | — (required) | Base-asset quantity per grid level |
 | tpPct | number | 3.0 | Take-profit, % ROI on margin used |
-| stopLossPct | number | 40.0 | Stop-loss, % ROI loss on margin used, computed on UNREALIZED PnL only |
+| stopLossPct | number | 20.0 | Stop-loss, % ROI loss on margin used, computed on UNREALIZED PnL only |
 | stopOrderType | enum | "market" | "market" (recommended) / "limit" |
 | leverage | int | 1 | Futures leverage (recommend 1–3) |
 | pollIntervalMs | int | 3000 | Supervisor poll interval |

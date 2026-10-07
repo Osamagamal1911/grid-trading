@@ -1,0 +1,29 @@
+{
+  // alphaGrid TESTNET starter (copy to config.json5, then TUNE for your coin).
+  // This exact shape ran the S10 mechanics test on AKEUSDT/testnet. Testnet only.
+  settings: {
+    symbol: "AKEUSDT",
+    direction: "auto", // first fill locks long/short per cycle
+    gridMode: "atr", // "atr" (0.5 × ATR(14) spacing) or "manual" (+ manualHigh/LowPrice)
+    nLevels: 8,
+    atrMultiplier: 0.5,
+    atrTimeframe: "1h",
+    // REQUIRED, no default: base-asset qty per level. Size so EVERY level clears
+    // MIN_NOTIONAL ($5 on Binance futures) AND so stops stay placeable:
+    // entries need ≥ minNotional / (1 − stopLossPct/(100×leverage)).
+    // 1100 AKE ≈ $5.5–30/order across the Sep–Oct 2026 window (D42).
+    volumePerLevel: 1100,
+    tpPct: 3.0,
+    stopLossPct: 20.0, // default; tighter than the original 40 (D50, capital preservation)
+    stopOrderType: "market", // recommended (stop-limit can gap-miss)
+    leverage: 1, // recommend 1–3; leverage is SENT to the exchange, not just logged
+    pollIntervalMs: 3000,
+    useTrailing: true, // pump-capture; false = classic fixed grid
+    trailingShiftLevels: 2,
+    useTakeProfit: true,
+    useStopLoss: true, // false = NO protection (dashboard warns); not recommended
+    useExchangeStopOrder: true, // false = supervisor poll is the only protection
+  },
+  pair: "AKE/USDT", // framework pair slot; strategy trades settings.symbol
+  exchange: "TESTNET", // must match a key in exchanges.json5
+}

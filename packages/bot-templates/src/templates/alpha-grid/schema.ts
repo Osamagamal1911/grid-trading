@@ -48,7 +48,7 @@ export const alphaGridSchema = z.object({
   stopLossPct: z
     .number()
     .positive()
-    .default(40.0)
+    .default(20.0)
     .describe("Stop-loss, % ROI loss on UNREALIZED PnL (required if useStopLoss)"),
   stopOrderType: z.enum(["market", "limit"]).default("market").describe("market (recommended) / limit"),
   leverage: z.number().int().min(1).default(1).describe("Futures leverage (recommend 1–3)"),
