@@ -25,7 +25,8 @@ Acceptance criteria:
       untouched upstream tree; baseline `vitest` run recorded in HANDOFF.md.
 - [ ] Branch pushed to `origin` (`git push -u origin feature/alphaGrid`).
 
-Status: IN PROGRESS (branch created, docs in progress; upstream import pending human decision S1-Q1).
+Status: IN PROGRESS (branch ✅, docs ✅, upstream import ✅ merged `90f601c2`, remotes ✅;
+remaining: Node/pnpm toolchain, `pnpm install`, baseline typecheck+vitest).
 
 ## S2 — Bootstrap docs (DECISIONS.md, HANDOFF.md, ALPHAGRID.md skeleton)
 
@@ -188,3 +189,5 @@ Status: TODO (out of scope for build sessions; human runs it).
 
 - 2026-10-07: S1/S2 bootstrapped (first session, muse-spark). S1 partial: branch created, docs
   in progress; upstream import blocked on S1-Q1 (fork target repo decision).
+- 2026-10-07: S1-Q1 answered (import into grid-trading, D15); upstream `dev` @ `8b8e245` merged
+  (`90f601c2`); S2 done (`6f36c1d`). S1 remaining: toolchain + baseline test runs.
