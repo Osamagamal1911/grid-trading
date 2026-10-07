@@ -1,0 +1,35 @@
+# alphaGrid secrets + build-artifact ignore rules (extends any upstream .gitignore after import)
+# Spec BUILD_PROMPT.md §8.6: never stage credentials, DB files holding them, or build output.
+
+# Secrets / credentials — NEVER commit
+.env
+.env.*
+*.key
+*.pem
+exchanges.json5
+config.json5
+*secret*
+
+# Local databases (may hold credentials)
+*.sqlite*
+*.sqlite3
+*.db
+prisma/*.db
+
+# Market data caches
+klines/
+*.log
+
+# Dependencies / build output
+node_modules/
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
