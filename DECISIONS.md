@@ -700,6 +700,24 @@ unit tests (explicit `stopLossPct: 40` configs remain valid coverage of 40% beha
 Rationale per human: tighter default favors capital preservation on small per-coin sizes.
 Why logged as HUMAN not AUTO: spec changes require human approval — this is the receipt.
 
+### 2026-10-07 · D52 [AUTO]: 20% sweep design + honest verdict (both still lose)
+
+What: backtest runner extended to 3 configs on the same window/data/sizing (volume 1100,
+capital $2000 — only stop% and trailing vary): M2 record (40%, trail ON, kept as history),
+Sweep A (20%, trail OFF), Sweep B (20%, trail ON). Report asserts per-config gates
+(never-early stop-outs at each config's own stopLossPct). Results: M2 −16.88% / 22.95% DD /
+94.23% (98/104) / 6 stops; A −13.01% / 18.26% / 88.39% (99/112) / 13 stops; B IDENTICAL to A
+to the digit (trailing never changed a fill sequence on this window).
+Verdict, stated plainly: 20% loses LESS (−13.01% vs −16.88% — smaller stop-outs outweigh
+2× the stop count) but does NOT flip expectancy; trailing is NEUTRAL here (pump-capture
+pays on sustained directional runs like LOBSTER, not on this chop-then-bleed window).
+All stops exchange-hit, 0 supervisor, 0 liquidations, 0 netted — Layer 1 did all the work
+in sim. No parameter-massaging to manufacture a win; table + verdict in ALPHAGRID §4.
+Why: isolating one variable at a time (same size/capital/data) is the only honest sweep;
+trailing-neutrality is itself a finding (feature value is regime-dependent, as §1 claims).
+Rejected: re-tuning tpPct/leverage/volume until green (overfit theater); dropping the 40%
+run (history must stand); asserting trailing superiority the data refutes.
+
 ### 2026-10-07 · D51 [AUTO]: Part A portability — setup.sh, samples, no new Docker
 
 What:

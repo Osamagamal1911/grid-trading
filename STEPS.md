@@ -248,3 +248,10 @@ wall-clock with dashboard observation. Daemon left STOPPED, testnet slate CLEAN.
   $5.11 fees, 0 liqs; BACKTEST_AKEUSDT.md; m2 tags with this step (D41–D46).
   (Note: a stray duplicate S5 line stood here from an anchor misfire — removed; canonical
   S5 entry above is untouched.)
+- 2026-10-07: Session 5 (muse-spark). Human-approved default stopLossPct 40→20 (D50:
+  schema + BUILD_PROMPT §4.1 + tests/docs). Part A portability: scripts/setup.sh
+  (verified via fresh /tmp clone on clean HOME → CLI + daemon boot green) + ALPHAGRID §1
+  runbook + alphagrid samples (D51). Part B sweep appended to BACKTEST_AKEUSDT.md:
+  20%/no-trail −13.01% (13 stops), 20%/trail IDENTICAL (trailing neutral here — D52 verdict:
+  tighter stops lose less but don't flip expectancy). Part C: ALPHAGRID §9 soak runbook
+  (tmux commands, watch items, pass/fail). S10 still OPEN (48h wall-clock, human).

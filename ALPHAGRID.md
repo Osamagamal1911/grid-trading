@@ -147,6 +147,8 @@ reproduced: averaging concentrates size into losers. Full report: BACKTEST_AKEUS
 |---|---|---|---|---|---|---|
 | Calm range (untested) | 1–2 | 8 | 0.5 | 3.0 | 20.0 | Defaults; validate on data first |
 | High-volatility Alpha listing (M2-measured at 40%) | 1 | 8 | 0.5 | 3.0 | 40.0 | Loses to bleed at lev 1 — see above |
+| Same window, 20% stop, trailing OFF (sweep A) | 1 | 8 | 0.5 | 3.0 | 20.0 | −13.01%, 13 stops — loses less, still loses |
+| Same window, 20% stop, trailing ON (sweep B) | 1 | 8 | 0.5 | 3.0 | 20.0 | Identical to sweep A: trailing neutral here |
 | Pump-capture (LOBSTERUSDT 2026-10-07: +52.46% in ~8h) | 10, isolated | 6 | trailing on | n/a (TP rode) | unrealized stop as net | Profit came from the leveraged directional move + trailing, NOT oscillation |
 
 Conservative defaults first; leverage is the dominant risk knob (a 10x LOBSTER-style run
@@ -239,6 +241,50 @@ needs the unrealized stop sized accordingly). Backtest YOUR coin/window before d
 - OPEN: 48h+ soak wall-clock (human runs/observes); re-run kill test on a supervisor-stop
   path (this session killed a healthy position — stop-hit/supervisor-terminate paths are
   unit-covered, live-proven pending).
+
+### Soak runbook (48h+, human executes — prepare-only in build sessions)
+
+Goal: prove unattended survival + dashboard freshness over wall-clock time. Testnet only.
+
+```bash
+# 0. Fresh shell, tmux so the soak survives session cleanup (REQUIRED — see D49c):
+tmux new -s alphagrid-soak
+# (alternative: systemd unit with Restart=always; tmux is the documented path)
+
+# 1. Inside tmux: env + daemon (detached inside tmux is belt-and-braces)
+export PATH="$HOME/.local/node-v22/bin:$PATH"
+export BINANCE_API_KEY="$(sed -n 's/^key: //p' binance-test-net)"
+export BINANCE_API_SECRET="$(sed -n 's/^secret: //p' binance-test-net)"
+./bin/cli.sh up -d
+./bin/cli.sh status            # expect 🟢 Running + PID
+
+# 2. Deploy (uses ./config.json5 + ./exchanges.json5; tune volumePerLevel first)
+./bin/cli.sh trade alphaGrid    # expect "started succesfully"
+
+# 3. Detach and walk away: Ctrl-b d. Reattach anytime: tmux attach -t alphagrid-soak
+```
+
+What to watch (daily, ~5 min):
+
+- DB bot row (`direction/fills/orders/tpOrderId/stopOrderId/cycleCount`, `updatedAt`
+  advancing = ticks alive) + `botLog` tick stream (S10 session queries in HANDOFF).
+- Testnet venue truth: open orders (grid + TP + algo stop present?) and positions tab.
+  Any untracked open order for the symbol = the bot REFUSES loudly (D36) — cancel
+  strays on the venue, restart the bot.
+- `~/.opentrader/log.log` for `[AlphaGrid]` warn lines (stop skips, supervisor actions,
+  degrade flags `stopDownReason`/`tpUnplaceable`).
+
+Kill test re-run (once mid-soak, mid-position): `kill -9 <daemon-pid>` → within minutes
+verify on testnet that the algo stop (+ TP + grids) still rest → restart daemon
+(clear `~/.opentrader/pid` if stale) → `trade alphaGrid` redeploys (stop-phase flattens
+leftovers first).
+
+Pass criteria: 48h+ uptime across ticks with no unexplained gaps; every stop-out shows
+unrealized ≈ −stopLossPct% in state/history; kill test re-passes; testnet slate ends CLEAN
+(`stop` + no opens + no position).
+Fail criteria (stop the soak, report): repeated tick errors in botLog, state/venue
+divergence (untracked fills, orphan stops), any secret in DB/logs (S3 audit), or a
+liquidation (would falsify the sizing math — escalate, do not redeploy blindly).
 17. (S8) Breach evaluation throttled to pollIntervalMs; re-sync runs every tick (D40a).
 18. (S8) No alert channel upstream — breaches log warn; external alerting is pre-live work.
 19. (S8) Futures market-stop quantity = BASE qty (stale quote-currency comment corrected — D39).

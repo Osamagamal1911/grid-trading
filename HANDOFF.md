@@ -4,6 +4,59 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
 
 ---
 
+## Session 5 — 2026-10-07 · muse-spark-1.3-free (OpenCode) · portability + 20% default + sweep + soak prep
+
+Human-authorized spec change (only one): default `stopLossPct` 40 → 20 (D50 receipt).
+
+### Completed this session
+
+- **Spec change (D50)**: schema default + BUILD_PROMPT §4.1 + S5 defaults test + ALPHAGRID
+  calm row → 20.0. M2 record (40% run + test), §5 criteria, strategy unit tests (explicit 40
+  configs) deliberately UNCHANGED. Tests green.
+- **Part A portability**: `scripts/setup.sh` (executable, idempotent, no sudo: Node 22.12
+  x64+arm64, pnpm 10.12.1, install, moon workaround, `tsc --build` 13 pkgs, `.env`-iff-missing,
+  migrate, app build). Verified via TRUE fresh clone in /tmp on clean HOME (download +
+  install + build + migrate + `cli --help` + `up -d` → 🟢 Running + `down` clean).
+  Found+fixed by the gate: dist/ missing on fresh clones → setup.sh step 7 (`app:build`).
+  `config/exchanges.alphagrid.sample.json5` (placeholders only) + ALPHAGRID §1 runbook
+  (clone → soak commands, key minting, exports, watch guide). No new Docker (D51).
+  `.gitignore` audit: everything local covered, nothing to add.
+- **Part B sweep** (same window/size/capital, only stop% + trailing vary), appended to
+  BACKTEST_AKEUSDT.md (40% history intact): M2 −16.88% (6 stops) · 20%/OFF −13.01%
+  (13 stops) · 20%/ON **identical** to OFF. Verdict (D52): 20% loses less but doesn't flip
+  expectancy; trailing neutral on this window (pays on sustained runs, not chop-bleed).
+  All gates green (never-early stops at each config's own level, TP net > 0, 0 liqs).
+- **Part C soak prep**: ALPHAGRID §9 runbook (tmux commands, watch items, kill re-run,
+  pass/fail incl. liquidation-escalation rule). Machine left CLEAN: no daemon, bot
+  disabled in DB, testnet 0/0/none (all three verified this session).
+- Commits: `S10 portability setup + 20% stop default`, `S10 setup.sh builds app dist`,
+  (+ this session close below). Test suites: bot-templates 253, backtesting 9+8sim,
+  typechecks clean (13 pkgs; app 2 pre-existing).
+
+### In progress / next (ordered)
+
+1. Push branch (this session end; no new tags — m1/m2 already pushed).
+2. S10 REMAINS OPEN (human): 48h soak per §9 runbook. Then PR (human approval), M4 out of scope.
+
+### Blockers / open questions
+
+- None blocking. Note: trailing showed zero effect on THIS window — not a bug (D52);
+  its value case (sustained pumps) is LOBSTER-measured, untested in backtest.
+
+### Traps (additions this session)
+
+- Fresh-clone gates catch real gaps (dist/ was missing) — always verify, never assume.
+- `edit` anchor collisions silently duplicate/overwrite: grep-verify after structural edits;
+  DECISIONS order stays scrambled by rule (numbering is the key).
+- pkill-by-pattern suicides; testnet books show YOUR orders as best bid/ask (don't read
+  structure into spoof depth); `trade` needs a RUNNING daemon (clean RPC error otherwise).
+
+### Commit
+
+- `alphaGrid: S10 sweep + soak prep`, push `origin/feature/alphaGrid`. HANDOFF included here.
+
+---
+
 ## Session 4+ — 2026-10-07 · muse-spark-1.3-free (OpenCode) · S4→S9 + S10 testnet validation (part 1)
 
 Full-build autonomy grant. S4, S5, S6, S7, S8, S9 DONE and committed; M1+M2 TAGGED;
