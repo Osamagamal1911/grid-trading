@@ -359,6 +359,44 @@ Why: exchange order rejection on tick violation is a silent-grid-killer; exact t
 also what §4.2 demands ("real tickSize/stepSize").
 Rejected: decimals-first derivation (lossy for odd/integer ticks); hardcoded decimals.
 
+### 2026-10-07 · D39 [AUTO]: Stop-order plumbing — triggerBasis + quantity convention
+
+What: `IPlaceStopOrderRequest` gains `reduceOnly?: boolean` + `triggerBasis?: "mark" | "last"`
+(both optional — zero behavior change for the nonexistent upstream callers); normalize maps
+`"mark" → workingType MARK_PRICE` (Binance futures stop trigger) and appends ccxt params ONLY
+when specified. Strategy-domain language ("mark"/"last") keeps MemoryExchange generic for S9.
+Quantity for futures market stops = BASE qty (reduceOnly close of a base-denominated position);
+the stale "market = quote currency" comment (spot market-buy lore, zero in-repo callers) is
+corrected, with testnet verification of workingType + qty semantics booked as an S10 checklist
+item. Supervisor throttle (D30): breach evaluation gated on `pollIntervalMs`, tests drive it
+deterministically with fake timers + `lastSupervisorRun` control.
+Why: spec §4.4 demands mark-triggered reduceOnly stops; additive-optionals preserve upstream;
+S10 proves the exchange actually honors both flags.
+Rejected: defaulting workingType globally (would silently change any future upstream caller);
+quote-currency stop qty (wrong for futures reduceOnly closes).
+
+### 2026-10-07 · D40 [AUTO]: S8 supervisor + stop-hit + shared termination design
+
+What:
+(a) Breach evaluation gated on `pollIntervalMs` via `state.lastSupervisorRun` (D30);
+TP/SL drift re-sync runs every tick through the idempotent sync fns (the throttle gates
+only the close decision, never re-sync freshness).
+(b) Exchange stop execution (any delta on a tracked stop) → `handleExchangeStopHit`:
+shared `terminatePosition` (cancel all → market-close remainder reduceOnly → clear →
+`control.stop()`), taking precedence over TP-cycle logic the same tick.
+(c) Manual-stop dust remainder changed S7-throw → warn + clear (the bot is stopping anyway;
+unclosable dust is logged loudly for manual recovery).
+(d) No external alert channel exists upstream — breaches log `warn`; Telegram/webhook
+alerting booked as pre-live work (ALPHAGRID §3.2), not silently omitted.
+(e) Paper + Layer-1-on fails loud at placement (`PaperExchange.placeStopOrder` throws by
+upstream design) — operator sets `useExchangeStopOrder=false` on paper; no auto-fallback
+that would mask the missing layer.
+Why: (a) matches the spec cadence without re-running closes; (b) one termination path for
+three triggers (manual/stop-hit/supervisor) — no divergent close logic; (c) a stopping bot
+must not hang on dust; (d/e) loud > masked, always.
+Rejected: per-tick breach checks ignoring pollIntervalMs (setting would be vestigial);
+auto paper fallback (masks missing protection); separate close implementations per trigger.
+
 ### 2026-10-07 · D30 [AUTO]: S5 template design — static interval + plain schema + separate validator
 
 What:

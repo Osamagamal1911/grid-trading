@@ -4,13 +4,14 @@
  * What: implements the FULL IExchange surface used by the strategy against
  * operator-controlled order books (no network, fully deterministic). Tests move
  * orders between open/closed to simulate fills; every mutating call is logged
- * for no-churn / reduceOnly / leverage assertions. Unexpected stop-order calls
- * throw (S7 places none — S8 replaces those stubs with simulation).
+ * for no-churn / reduceOnly / leverage assertions.
  *
  * Why a hand mock (not MemoryExchange): pinpoints exact fill sequences per test;
  * MemoryExchange grows its own simulation in S9.
  */
 
+import { vi } from "vitest";
+import type { TBotContext } from "@opentrader/bot-processor";
 import type { IExchange } from "@opentrader/exchanges";
 import type {
   ExchangeCode,
@@ -26,8 +27,11 @@ import type {
   IPlaceLimitOrderResponse,
   IPlaceMarketOrderRequest,
   IPlaceMarketOrderResponse,
+  IPlaceStopOrderResponse,
   OrderSide,
 } from "@opentrader/types";
+import { alphaGridStrategy, type AlphaGridRuntimeState } from "./strategy.js";
+import type { AlphaGridBotConfig } from "./schema.js";
 
 export interface MockAlphaGridSymbol {
   tickSize: number;
@@ -164,8 +168,41 @@ export class MockAlphaGridExchange implements IExchange {
     throw new Error("MockAlphaGridExchange: placeOrder not expected");
   }
 
-  async placeStopOrder(): Promise<never> {
-    throw new Error("MockAlphaGridExchange: placeStopOrder not expected in S7 (S8 simulates stops)");
+  /** Simulated conditional stop (S8): tracked as an open order until filled/canceled. */
+  stopOrders: { orderId: string; params: Record<string, unknown> }[] = [];
+
+  async placeStopOrder(params: {
+    symbol: string;
+    side: OrderSide;
+    quantity: number;
+    type: string;
+    stopPrice: number;
+    price?: number;
+    reduceOnly?: boolean;
+    triggerBasis?: string;
+  }): Promise<IPlaceStopOrderResponse> {
+    this.log("placeStopOrder", params);
+    this.reduceOnlyFlags.push({ method: "placeStopOrder", value: params.reduceOnly });
+    this.seq += 1;
+    const orderId = `mock-stop-${this.seq}`;
+    this.stopOrders.push({ orderId, params: { ...params } });
+    this.openOrders.set(orderId, {
+      exchangeOrderId: orderId,
+      clientOrderId: undefined,
+      symbol: params.symbol,
+      side: params.side,
+      quantity: params.quantity,
+      quantityExecuted: 0,
+      volume: params.quantity * params.stopPrice,
+      volumeExecuted: 0,
+      price: params.stopPrice,
+      filledPrice: null,
+      lastTradeTimestamp: 0,
+      status: "open",
+      fee: 0,
+      createdAt: Date.now(),
+    });
+    return { orderId };
   }
 
   async cancelLimitOrder(params: { symbol: string; orderId: string }): Promise<{ orderId: string }> {
@@ -279,4 +316,98 @@ export function mockSideOrders(
   return [...exchange.openOrders.values()]
     .filter((o) => o.side === side)
     .map((o) => ({ exchangeOrderId: o.exchangeOrderId, price: o.price }));
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared deterministic harness (S7 + S8 suites).                      */
+/* ------------------------------------------------------------------ */
+
+export const MARKET = "AKE/USDT:USDT";
+
+export function baseSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    symbol: "AKEUSDT",
+    direction: "auto",
+    gridMode: "manual",
+    manualHighPrice: 130,
+    manualLowPrice: 70,
+    nLevels: 3,
+    volumePerLevel: 1,
+    tpPct: 3,
+    stopLossPct: 40,
+    leverage: 1,
+    useTrailing: true,
+    useTakeProfit: true,
+    useStopLoss: true,
+    useExchangeStopOrder: true,
+    ...overrides,
+  };
+}
+
+export interface TestCtx {
+  ctx: TBotContext<AlphaGridBotConfig>;
+  control: { stop: ReturnType<typeof vi.fn> };
+}
+
+export function makeCtx(
+  exchange: MockAlphaGridExchange,
+  settings: Record<string, unknown>,
+  state: Record<string, unknown>,
+  mode: "start" | "process" | "stop",
+): TestCtx {
+  const control = { stop: vi.fn<() => Promise<void>>().mockResolvedValue(undefined) };
+  const ctx = {
+    config: { id: 1, symbol: "AKEUSDT", settings },
+    state,
+    exchange,
+    control,
+    command: mode === "process" ? "process" : mode,
+    onStart: mode === "start",
+    onStop: mode === "stop",
+    onProcess: mode === "process",
+    market: { candles: [] },
+    markets: {},
+  } as unknown as TBotContext<AlphaGridBotConfig>;
+  return { ctx, control };
+}
+
+export async function drain(gen: Generator<Promise<unknown>, void, unknown>): Promise<void> {
+  let item = gen.next();
+  while (!item.done) {
+    if (!(item.value instanceof Promise)) {
+      throw new Error("strategy yielded a non-promise effect (only exchange promises allowed)");
+    }
+    item = gen.next(await item.value);
+  }
+}
+
+export async function runTick(
+  exchange: MockAlphaGridExchange,
+  settings: Record<string, unknown>,
+  state: Record<string, unknown>,
+  mode: "start" | "process" | "stop" = "process",
+): Promise<{ state: AlphaGridRuntimeState; control: { stop: ReturnType<typeof vi.fn> } }> {
+  const { ctx, control } = makeCtx(exchange, settings, state, mode);
+  await drain(alphaGridStrategy(ctx));
+  return { state: state as unknown as AlphaGridRuntimeState, control };
+}
+
+export function buyIds(exchange: MockAlphaGridExchange): string[] {
+  return mockSideOrders(exchange, "buy").map((o) => o.exchangeOrderId);
+}
+
+export function sellIds(exchange: MockAlphaGridExchange): string[] {
+  return mockSideOrders(exchange, "sell").map((o) => o.exchangeOrderId);
+}
+
+export function walkCandles(count: number, start = 100): { high: number; low: number; close: number }[] {
+  const out: { high: number; low: number; close: number }[] = [];
+  let price = start;
+  for (let i = 0; i < count; i += 1) {
+    const drift = ((i * 37) % 11) - 5;
+    const close = Math.max(1, price + drift * 0.4);
+    out.push({ high: Math.max(price, close) + 0.8, low: Math.max(0.5, Math.min(price, close) - 0.8), close });
+    price = close;
+  }
+  return out;
 }

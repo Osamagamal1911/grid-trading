@@ -86,14 +86,27 @@ const placeMarketOrder: Normalize["placeMarketOrder"] = {
 const placeStopOrder: Normalize["placeStopOrder"] = {
   request: (params) => {
     const type = params.type === "limit" ? "limit" : "market";
-
-    return [
+    const base = [
       params.symbol,
       type,
       params.side,
       params.quantity,
       type === "limit" ? params.price : undefined,
       params.stopPrice,
+    ] as const;
+
+    // alphaGrid S8 (D39): forward extras ONLY when specified (upstream behavior unchanged).
+    if (params.reduceOnly === undefined && params.triggerBasis === undefined) {
+      return [...base];
+    }
+    return [
+      ...base,
+      {
+        ...(params.reduceOnly !== undefined ? { reduceOnly: params.reduceOnly } : {}),
+        ...(params.triggerBasis !== undefined
+          ? { workingType: params.triggerBasis === "mark" ? "MARK_PRICE" : "CONTRACT_PRICE" }
+          : {}),
+      },
     ];
   },
   response: (order) => ({

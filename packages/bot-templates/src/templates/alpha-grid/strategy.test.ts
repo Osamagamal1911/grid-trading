@@ -2,107 +2,24 @@
  * alphaGrid S7 — strategy core tests (mock IExchange, no network).
  *
  * Each S7 acceptance criterion maps to tests below: direction lock, averaging +
- * TP re-sync (idempotent), trailing предусмот up/down + idle-off, ride-without-TP +
+ * TP re-sync (idempotent), trailing up/down + idle-off, ride-without-TP +
  * manual stop, one-position invariant, leverage actually sent, restart recovery,
  * foreign-order refusal, ATR/manual spacing paths, partial fills.
  */
-import { describe, expect, it, vi } from "vitest";
-import type { TBotContext } from "@opentrader/bot-processor";
+import { describe, expect, it } from "vitest";
 import { computeAtrLevelSpacing, computeTakeProfitPrice } from "@opentrader/tools";
 import { atr, latestAtrValue } from "@opentrader/indicators";
-import { alphaGridStrategy, type AlphaGridRuntimeState } from "./strategy.js";
-import type { AlphaGridBotConfig } from "./schema.js";
-import { MockAlphaGridExchange, mockSideOrders } from "./strategy.test-utils.js";
+import type { AlphaGridRuntimeState } from "./strategy.js";
+import {
+  MockAlphaGridExchange,
+  baseSettings,
+  buyIds,
+  runTick,
+  sellIds,
+  walkCandles,
+} from "./strategy.test-utils.js";
 
 const MARKET = "AKE/USDT:USDT";
-
-function baseSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    symbol: "AKEUSDT",
-    direction: "auto",
-    gridMode: "manual",
-    manualHighPrice: 130,
-    manualLowPrice: 70,
-    nLevels: 3,
-    volumePerLevel: 1,
-    tpPct: 3,
-    stopLossPct: 40,
-    leverage: 1,
-    useTrailing: true,
-    useTakeProfit: true,
-    useStopLoss: true,
-    useExchangeStopOrder: true,
-    ...overrides,
-  };
-}
-
-interface Ctx {
-  ctx: TBotContext<AlphaGridBotConfig>;
-  control: { stop: ReturnType<typeof vi.fn> };
-}
-
-function makeCtx(
-  exchange: MockAlphaGridExchange,
-  settings: Record<string, unknown>,
-  state: Record<string, unknown>,
-  mode: "start" | "process" | "stop",
-): Ctx {
-  const control = { stop: vi.fn() };
-  const ctx = {
-    config: { id: 1, symbol: "AKEUSDT", settings },
-    state,
-    exchange,
-    control,
-    command: mode === "process" ? "process" : mode,
-    onStart: mode === "start",
-    onStop: mode === "stop",
-    onProcess: mode === "process",
-    market: { candles: [] },
-    markets: {},
-  } as unknown as TBotContext<AlphaGridBotConfig>;
-  return { ctx, control };
-}
-
-async function drain(gen: Generator<Promise<unknown>, void, unknown>): Promise<void> {
-  let item = gen.next();
-  while (!item.done) {
-    if (!(item.value instanceof Promise)) {
-      throw new Error("strategy yielded a non-promise effect (only exchange promises allowed)");
-    }
-    item = gen.next(await item.value);
-  }
-}
-
-async function runTick(
-  exchange: MockAlphaGridExchange,
-  settings: Record<string, unknown>,
-  state: Record<string, unknown>,
-  mode: "start" | "process" | "stop" = "process",
-): Promise<{ state: AlphaGridRuntimeState; control: { stop: ReturnType<typeof vi.fn> } }> {
-  const { ctx, control } = makeCtx(exchange, settings, state, mode);
-  await drain(alphaGridStrategy(ctx));
-  return { state: state as unknown as AlphaGridRuntimeState, control };
-}
-
-function buyIds(exchange: MockAlphaGridExchange): string[] {
-  return mockSideOrders(exchange, "buy").map((o) => o.exchangeOrderId);
-}
-
-function sellIds(exchange: MockAlphaGridExchange): string[] {
-  return mockSideOrders(exchange, "sell").map((o) => o.exchangeOrderId);
-}
-
-function walkCandles(count: number, start = 100): { high: number; low: number; close: number }[] {
-  const out: { high: number; low: number; close: number }[] = [];
-  let price = start;
-  for (let i = 0; i < count; i += 1) {
-    const drift = ((i * 37) % 11) - 5;
-    const close = Math.max(1, price + drift * 0.4);
-    out.push({ high: Math.max(price, close) + 0.8, low: Math.max(0.5, Math.min(price, close) - 0.8), close });
-    price = close;
-  }
-  return out;
-}
 
 describe("startup", () => {
   it("draws both sides in auto mode and sends leverage (dkalenov lesson b)", async () => {
@@ -181,9 +98,10 @@ describe("direction lock + averaging + TP sync", () => {
 
     expect(state.direction).toBe("long");
     expect(state.totalQty).toBe(1);
-    expect(sellIds(exchange).length).toBe(1); // only the TP sell remains
+    expect(sellIds(exchange).length).toBe(2); // TP sell + Layer-1 stop sell
+    expect(sellIds(exchange).sort()).toEqual([state.tpOrderId, state.stopOrderId].sort());
     expect(buyIds(exchange).length).toBe(2);
-    expect(exchange.callsTo("cancelLimitOrder").length).toBe(3); // the 3 auto-mode sells
+    expect(exchange.callsTo("cancelLimitOrder").length).toBe(3); // the 3 auto-mode grid sells
   });
 
   it("first sell fill locks short (mirror)", async () => {
@@ -195,27 +113,26 @@ describe("direction lock + averaging + TP sync", () => {
     const { state: s } = await runTick(exchange, settings, state);
 
     expect(s.direction).toBe("short");
-    // 2 grid sells remain; the only buy is the TP (short exits via buy).
+    // 2 grid sells remain; the buys are TP + Layer-1 stop (short exits via buy).
     expect(sellIds(exchange).length).toBe(2);
-    expect(buyIds(exchange).length).toBe(1);
-    expect(buyIds(exchange)[0]).toBe(s.tpOrderId);
+    expect(buyIds(exchange).length).toBe(2);
+    expect(buyIds(exchange).sort()).toEqual([s.tpOrderId, s.stopOrderId].sort());
   });
 
   it("recomputes avgEntry after every fill and re-syncs ONE TP (reduceOnly)", async () => {
     const { exchange, settings, state } = await longLocked();
-    const tpAfterFirst = sellIds(exchange);
-    expect(tpAfterFirst.length).toBe(1);
-    const firstTp = exchange.openOrders.get(tpAfterFirst[0]);
+    const firstTpId = state.tpOrderId as string;
+    const firstTp = exchange.openOrders.get(firstTpId);
     expect(firstTp?.price).toBe(computeTakeProfitPrice(90, 3, 1, "long", 0.01)); // 92.7
     expect(exchange.reduceOnlyFlags.filter((f) => f.method === "placeLimitOrder" && f.value === true).length).toBe(1);
 
     exchange.fillOrder(buyIds(exchange)[0], 80);
     await runTick(exchange, settings, state as unknown as Record<string, unknown>);
 
-    const tpAfterSecond = sellIds(exchange);
-    expect(tpAfterSecond.length).toBe(1); // still exactly ONE TP
-    expect(tpAfterSecond[0]).not.toBe(tpAfterFirst[0]); // replaced (price moved)
-    const secondTp = exchange.openOrders.get(tpAfterSecond[0]);
+    const secondTpId = state.tpOrderId as string;
+    expect(secondTpId).not.toBe(firstTpId); // replaced (price moved)
+    expect(sellIds(exchange)).toContain(secondTpId);
+    const secondTp = exchange.openOrders.get(secondTpId);
     expect(secondTp?.price).toBe(computeTakeProfitPrice(85, 3, 1, "long", 0.01)); // avg 85 → 87.55
   });
 
@@ -249,8 +166,7 @@ describe("direction lock + averaging + TP sync", () => {
 
   it("TP fill closes the cycle → FLAT → fresh grid", async () => {
     const { exchange, settings, state } = await longLocked();
-    const tpId = sellIds(exchange)[0];
-    exchange.fillOrder(tpId, 92.7);
+    exchange.fillOrder(state.tpOrderId as string, 92.7);
     const placesBefore = exchange.callsTo("placeLimitOrder").length;
     const { state: s } = await runTick(exchange, settings, state as unknown as Record<string, unknown>);
 
@@ -289,7 +205,7 @@ describe("trailing (pump-capture)", () => {
 
   it("shifts the grid up on pumps, keeps position + TP", async () => {
     const { exchange, settings, state } = await longWithTp();
-    const tpId = sellIds(exchange)[0];
+    const tpId = state.tpOrderId as string;
     const qtyBefore = state.totalQty;
 
     exchange.markPrice = 135; // above gridTop 130
@@ -298,7 +214,7 @@ describe("trailing (pump-capture)", () => {
     expect(state.centerPrice).toBe(120); // one 2-level block of 10
     expect(state.gridTop).toBe(150);
     expect(state.totalQty).toBe(qtyBefore); // position untouched
-    expect(sellIds(exchange)).toEqual([tpId]); // TP untouched
+    expect(sellIds(exchange).sort()).toEqual([tpId, state.stopOrderId].sort()); // TP + stop untouched
     expect(buyIds(exchange).length).toBe(3);
   });
 

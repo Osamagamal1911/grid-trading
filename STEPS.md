@@ -168,7 +168,11 @@ Acceptance criteria:
       ("not supported") — Layer 2 is the only protection in paper; M3 kill-test runs on
       Binance testnet (real exchange adapter), not the paper simulator.
 
-Status: TODO.
+Status: DONE (Layer 1 re-places from current avgEntry after every fill — reduceOnly +
+mark trigger + limit ±2% offset; Layer 2 throttled supervisor force-closes on UNREALIZED
+breach only (proven vs total-PnL), re-syncs drift idempotently; stop-hit precedence over
+TP-cycle; 13 stop tests green, `bot-templates:test` 247/247; D10 closed for stops —
+see DECISIONS.md D39–D40).
 
 ## S9 — Backtest parity + AKEUSDT report (M2, §4.5)
 
@@ -230,6 +234,8 @@ Status: TODO (out of scope for build sessions; human runs it).
 - 2026-10-07: S7 DONE (session 4+, muse-spark). `bot-templates/.../alpha-grid/strategy.ts`
   (state machine + trailing + TP sync) + 28 tests; `bot-templates:test` 234/234; all touched
   packages typecheck clean; app still 4 pre-existing errors (D35–D38).
+- 2026-10-07: S8 DONE (session 4+, muse-spark). Two-layer unrealized stop (D39–D40);
+  13 stop tests; `bot-templates:test` 247/247; typecheck + lint clean. M1 COMPLETE → tag next.
 - 2026-10-07: S5 DONE (session 4+, muse-spark). `bot-templates/src/templates/alpha-grid/`
   schema + stub + 206 tests (`bot-templates:test` first real suite); registry + dashboard-form
   gate green; existing templates untouched (D30–D32).

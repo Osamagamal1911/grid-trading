@@ -50,17 +50,38 @@ Identical code path in backtest (local fills + mark price, no `ccxt` in logic).
 
 ## 3. The two-layer unrealized stop (key feature)
 
+Unlike Binance in-platform bots (which stop on TOTAL PnL — realized + unrealized, letting a
+bleeding grid hide behind banked gains), alphaGrid stops on UNREALIZED ROI% of the CURRENT
+position only: `(mark − avgEntry) × signedQty / margin × 100`, recomputed from local fills.
+Prior cycles' profits never offset a bleeding position (tested).
+
 ### 3.1 Layer 1 — exchange-side stop order (primary)
 
-(TBD — S8. Document `stopOrderType="market"` recommendation and why stop-limit can gap-fail.)
+- After EVERY fill (and on position open), the stop is canceled and re-placed from the CURRENT
+  `avgEntry` — never a fixed deploy-time price. Full position size, `reduceOnly`, mark-price
+  trigger (`MARK_PRICE`, never last price).
+- `stopOrderType="market"` (default, recommended): fills through gaps. `"limit"` gets a ±2%
+  offset price (LONG −2%) but can miss in a gap — exactly when you need it.
+- Survives our server dying (the M3 kill-test). Verified on testnet in S10 (workingType +
+  quantity semantics checklist).
+- `useExchangeStopOrder=false`: Layer 1 off (paper simulator can't hold stops — D12);
+  the supervisor below is the only protection.
 
 ### 3.2 Layer 2 — supervisor poll (backup + dashboard)
 
-(TBD — S8. Default 3000ms; force-close sequence; drift re-sync.)
+- Every `pollIntervalMs` (default 3000ms; template tick is the cadence floor): recompute
+  unrealized ROI% locally; if ≤ −`stopLossPct`: cancel all → market-close remainder
+  (`reduceOnly`) → `control.stop()` → warn. TP/SL drift re-syncs idempotently every tick.
+- Covers gap-through-stop and stop-fill failures the exchange layer can miss.
+- Limitation: no external alert channel exists upstream — breaches log loudly (warn) for now;
+  wire Telegram/webhook alerting before live use.
 
 ### 3.3 Why unrealized PnL, not total PnL
 
-(TBD — contrast with Binance in-platform bots.)
+Because total-PnL stops let one banked winner subsidize a slow bleed into liquidation —
+exactly the failure mode on small per-coin sizes. The supervisor's close condition reads
+only current-position inputs (mark, avgEntry, qty, leverage); a unit test proves a
+profitable closed cycle does not prevent the next bleeding position from stopping.
 
 ## 4. Recommended settings per volatility regime
 
@@ -129,4 +150,8 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
 14. (S7) Ticks read precision-first (Binance TICK_SIZE mode verified in ccxt source — D38).
 15. (S7) Restart with untracked open orders for the symbol = loud refusal (never adopt or
     blind-cancel others' orders); crash orphans recover by manual cancel + restart (D36).
-16. (S7) Unfillable dust (remainder below stepSize) = loud error for manual recovery (D37a).
+16. (S7/S8) Unclosable dust: TP/SL placement below stepSize throws (fix sizing); terminal-close
+    dust remainder warns + clears so a stopping bot never hangs (D37a/D40c).
+17. (S8) Breach evaluation throttled to pollIntervalMs; re-sync runs every tick (D40a).
+18. (S8) No alert channel upstream — breaches log warn; external alerting is pre-live work.
+19. (S8) Futures market-stop quantity = BASE qty (stale quote-currency comment corrected — D39).

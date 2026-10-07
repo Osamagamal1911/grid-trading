@@ -11,7 +11,7 @@
  * (`syncTakeProfitOrder`) is structured for S8's stop branch.
  */
 
-import type { TBotContext } from "@opentrader/bot-processor";
+import type { TBotContext, IBotControl } from "@opentrader/bot-processor";
 import { logger } from "@opentrader/logger";
 import type { IExchange } from "@opentrader/exchanges";
 import type { BarSize, IGetLimitOrderResponse, IOpenOrder, OrderSide } from "@opentrader/types";
@@ -22,7 +22,9 @@ import {
   computeManualCenterPrice,
   computeManualLevelSpacing,
   computePositionFromFills,
+  computeStopLossPrice,
   computeTakeProfitPrice,
+  computeUnrealizedRoiPct,
   roundQuantityToStep,
   type AlphaGridFill,
   type AlphaGridSide,
@@ -40,7 +42,7 @@ import {
   toFuturesMarketId,
 } from "./market.js";
 
-export type AlphaGridTrackedOrderKind = "grid" | "tp";
+export type AlphaGridTrackedOrderKind = "grid" | "tp" | "stop";
 
 export interface AlphaGridTrackedOrder {
   orderId: string;
@@ -48,6 +50,8 @@ export interface AlphaGridTrackedOrder {
   side: OrderSide;
   price: number;
   quantity: number;
+  /** Stop-limit offset price (kind "stop" + stopOrderType limit only). */
+  limitPrice?: number;
   /** Executed qty already accounted (partials accumulate across ticks). */
   filledSoFar: number;
   /** Executed value already accounted (exact partial pricing). */
@@ -55,7 +59,7 @@ export interface AlphaGridTrackedOrder {
 }
 
 export interface AlphaGridRuntimeState {
-  version: 1;
+  version: 2;
   initialized: boolean;
   marketId: string;
   tickSize: number;
@@ -74,6 +78,10 @@ export interface AlphaGridRuntimeState {
   totalQty: number;
   orders: AlphaGridTrackedOrder[];
   tpOrderId: string | null;
+  /** Layer-1 exchange-side stop order id (S8; null when disabled/absent). */
+  stopOrderId: string | null;
+  /** Last supervisor evaluation, ms epoch (D30 throttle). */
+  lastSupervisorRun: number;
   noStopLossAck: boolean;
   idleOutOfRange: boolean;
   cycleCount: number;
@@ -84,7 +92,7 @@ type Yielded = Promise<unknown>;
 // back in, which no static type can express. Yields are always exchange promises.
 type StratGen<T = void> = Generator<Yielded, T, any>;
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 
 function freshState(marketId: string): AlphaGridRuntimeState {
   return {
@@ -104,6 +112,8 @@ function freshState(marketId: string): AlphaGridRuntimeState {
     totalQty: 0,
     orders: [],
     tpOrderId: null,
+    stopOrderId: null,
+    lastSupervisorRun: 0,
     noStopLossAck: false,
     idleOutOfRange: false,
     cycleCount: 0,
@@ -171,6 +181,9 @@ function untrackOrders(state: AlphaGridRuntimeState, orderIds: Set<string>): voi
   if (state.tpOrderId !== null && orderIds.has(state.tpOrderId)) {
     state.tpOrderId = null;
   }
+  if (state.stopOrderId !== null && orderIds.has(state.stopOrderId)) {
+    state.stopOrderId = null;
+  }
 }
 
 function* cancelTrackedOrders(
@@ -211,18 +224,20 @@ function executionDelta(
 
 /**
  * Reconcile tracked orders against the exchange (D36): record fill deltas
- * (grid → entries + direction lock; TP → position reduction), drop canceled,
- * refuse foreign orders.
+ * (grid → entries + direction lock; TP/stop → position reduction), drop canceled,
+ * refuse foreign orders. Returns true when an exchange stop-hit stopped the bot
+ * (caller must return immediately).
  */
 function* reconcileOrders(
   exchange: IExchange,
+  control: IBotControl,
   marketId: string,
-  settings: AlphaGridSettings,
   state: AlphaGridRuntimeState,
-): StratGen {
+): StratGen<boolean> {
   const openOrders: IOpenOrder[] = yield exchange.getOpenOrders({ symbol: marketId });
   const openById = new Map(openOrders.map((o) => [o.exchangeOrderId, o]));
   const wasFlat = state.direction === null;
+  let stopExecuted = false;
 
   const foreign = openOrders.filter((o) => !state.orders.some((t) => t.orderId === o.exchangeOrderId));
   if (foreign.length > 0) {
@@ -236,14 +251,20 @@ function* reconcileOrders(
     const open = openById.get(tracked.orderId);
     if (open) {
       const delta = executionDelta(open.quantityExecuted, open.volumeExecuted, tracked, null);
-      if (delta) accountExecution(state, tracked, delta);
+      if (delta) {
+        accountExecution(state, tracked, delta);
+        if (tracked.kind === "stop") stopExecuted = true;
+      }
       continue;
     }
     // Missing from open → resolve once via fetch. Account any remainder, then
     // drop only terminal orders (a still-open order here is a race — keep it).
     const fetched: IGetLimitOrderResponse = yield exchange.getLimitOrder({ symbol: marketId, orderId: tracked.orderId });
     const delta = executionDelta(fetched.quantityExecuted, fetched.volumeExecuted, tracked, fetched.filledPrice);
-    if (delta) accountExecution(state, tracked, delta);
+    if (delta) {
+      accountExecution(state, tracked, delta);
+      if (tracked.kind === "stop") stopExecuted = true;
+    }
     if (fetched.status === "filled" || fetched.status === "canceled") {
       untrackOrders(state, new Set([tracked.orderId]));
     }
@@ -261,6 +282,15 @@ function* reconcileOrders(
       state.direction,
     );
   }
+
+  // Exchange-side stop executed → the position is gone (or dust): cancel the rest,
+  // close any remainder, clear, and STOP the bot (spec §4.3). Takes precedence
+  // over TP-cycle logic below.
+  if (stopExecuted) {
+    yield* handleExchangeStopHit(exchange, control, marketId, state);
+    return true;
+  }
+  return false;
 }
 
 /** Apply one execution delta: grid fills average in (+ lock); TP executions reduce. */
@@ -283,6 +313,11 @@ function accountExecution(
       state.direction = fillSide;
       logger.info(`[AlphaGrid] Direction locked: ${fillSide} (first fill). Canceling opposite side.`);
     }
+  } else if (tracked.kind === "stop") {
+    // Exchange-side stop executed: the exchange closed (part of) the position.
+    state.totalQty -= delta.execQty;
+    if (state.totalQty < 0) state.totalQty = 0;
+    logger.warn(`[AlphaGrid] Exchange STOP executed ${delta.execQty} @ ${delta.execPrice} (remaining ${state.totalQty}).`);
   } else {
     state.totalQty -= delta.execQty;
     if (state.totalQty < 0) state.totalQty = 0;
@@ -408,6 +443,107 @@ function* syncTakeProfitOrder(
   logger.info(`[AlphaGrid] TP synced: ${side} ${tpQty} @ ${tpPrice} (avg ${position.avgEntry}).`);
 }
 
+/**
+ * Layer 1 — exchange-side unrealized stop (S8, spec §4.4): cancel + re-place from the
+ * CURRENT avgEntry after every fill (never a deploy-time fixed price). Mark-price
+ * trigger, reduceOnly, market default (stop-limit gets a ±2% offset price).
+ * Disabled entirely unless useStopLoss && useExchangeStopOrder.
+ */
+function* syncStopOrder(
+  exchange: IExchange,
+  marketId: string,
+  settings: AlphaGridSettings,
+  state: AlphaGridRuntimeState,
+): StratGen {
+  if (!settings.useStopLoss || !settings.useExchangeStopOrder) {
+    return;
+  }
+  if (state.direction === null || state.totalQty <= 0) return;
+
+  const position = computePositionFromFills(state.fills);
+  const slPrice = computeStopLossPrice(
+    position.avgEntry,
+    settings.stopLossPct,
+    settings.leverage,
+    state.direction,
+    state.tickSize,
+  );
+  const slQty = roundQuantityToStep(state.totalQty, state.stepSize);
+  if (slQty <= 0) {
+    throw new Error(`alphaGrid: remaining position ${state.totalQty} rounds to 0 at step ${state.stepSize} — manual recovery needed.`);
+  }
+  const side = directionToExitSide(state.direction);
+
+  const existing = state.orders.find((o) => o.orderId === state.stopOrderId);
+  const limitPrice =
+    settings.stopOrderType === "limit"
+      ? state.direction === "long"
+        ? slPrice * 0.98
+        : slPrice * 1.02
+      : undefined;
+  const matches =
+    existing !== undefined &&
+    existing.price === slPrice &&
+    existing.quantity === slQty &&
+    existing.limitPrice === limitPrice;
+  if (matches) return; // in sync — no churn.
+
+  if (existing) {
+    yield exchange.cancelLimitOrder({ symbol: marketId, orderId: existing.orderId });
+    untrackOrders(state, new Set([existing.orderId]));
+  }
+  const placed = yield exchange.placeStopOrder({
+    type: settings.stopOrderType,
+    symbol: marketId,
+    side,
+    quantity: slQty,
+    stopPrice: slPrice,
+    price: limitPrice,
+    reduceOnly: true,
+    triggerBasis: "mark",
+  });
+  state.orders.push({ orderId: placed.orderId, kind: "stop", side, price: slPrice, quantity: slQty, limitPrice, filledSoFar: 0, filledValueSoFar: 0 });
+  state.stopOrderId = placed.orderId;
+  logger.info(`[AlphaGrid] Stop synced (L1): ${side} ${slQty} @ ${slPrice} [${settings.stopOrderType}/mark].`);
+}
+
+/**
+ * Layer 2 — supervisor (S8, spec §4.4): throttled by pollIntervalMs (D30), evaluates
+ * UNREALIZED ROI% only (never realized/total — the Binance-bot differentiator),
+ * force-closes on breach: cancel all → market-close remainder reduceOnly → control.stop().
+ * TP/SL drift re-sync happens every tick via the idempotent sync fns above.
+ */
+function* supervisorBlock(
+  exchange: IExchange,
+  control: IBotControl,
+  marketId: string,
+  settings: AlphaGridSettings,
+  state: AlphaGridRuntimeState,
+  markPrice: number,
+): StratGen<boolean> {
+  if (!settings.useStopLoss || state.direction === null || state.totalQty <= 0) {
+    return false;
+  }
+  const now = Date.now();
+  if (now - state.lastSupervisorRun < settings.pollIntervalMs) {
+    return false; // throttled — evaluated on cadence, never faster than configured.
+  }
+  state.lastSupervisorRun = now;
+
+  const roi = computeUnrealizedRoiPct(markPrice, computePositionFromFills(state.fills).avgEntry, state.direction, state.totalQty, settings.leverage);
+  if (roi > -settings.stopLossPct) {
+    return false;
+  }
+  logger.warn(
+    `[AlphaGrid] Supervisor stop-loss: unrealized ROI ${roi.toFixed(2)}% ≤ −${settings.stopLossPct}% — force-closing.`,
+  );
+  yield* terminatePosition(exchange, control, marketId, state, {
+    stopBot: true,
+    reason: `Supervisor stop-loss hit (unrealized ${roi.toFixed(2)}%) — position closed, bot stopped.`,
+  });
+  return true;
+}
+
 /** TP fully executed → close cycle → FLAT → redraw around current mark. */
 function* closeCycle(
   exchange: IExchange,
@@ -418,11 +554,13 @@ function* closeCycle(
 ): StratGen {
   const openOrders: IOpenOrder[] = yield exchange.getOpenOrders({ symbol: marketId });
   const openIds = new Set(openOrders.map((o) => o.exchangeOrderId));
-  yield* cancelTrackedOrders(exchange, marketId, state, openIds, (o) => o.kind === "grid");
+  // Grids AND any orphan stop (a live stop would snipe the fresh grid).
+  yield* cancelTrackedOrders(exchange, marketId, state, openIds, (o) => o.kind === "grid" || o.kind === "stop");
   state.direction = null;
   state.fills = [];
   state.totalQty = 0;
   state.tpOrderId = null;
+  state.stopOrderId = null;
   state.cycleCount += 1;
   logger.info(`[AlphaGrid] Cycle #${state.cycleCount} complete (TP) — redrawing FLAT grid.`);
   yield* drawGrid(exchange, marketId, settings, state, markPrice);
@@ -486,16 +624,19 @@ function* maybeTrail(
   logger.info(`[AlphaGrid] Trailed ${state.direction} ${shifts} block(s): center ${newCenter}.`);
 }
 
-/** Manual stop (framework stop command): reconcile, cancel tracked, market-close remainder, clear. */
-function* flattenPosition(
+/**
+ * Shared termination path: cancel every tracked open order, market-close any
+ * remainder reduceOnly, clear position state. Optionally stops the bot.
+ * Manual stops pass stopBot=false (framework owns lifecycle); stop-hits and
+ * supervisor breaches pass stopBot=true (spec §4.3).
+ */
+function* terminatePosition(
   exchange: IExchange,
+  control: IBotControl | null,
   marketId: string,
-  settings: AlphaGridSettings,
   state: AlphaGridRuntimeState,
+  opts: { stopBot: boolean; reason: string },
 ): StratGen {
-  // Reconcile first: a fill may have landed since the last tick (else the close qty is wrong).
-  yield* reconcileOrders(exchange, marketId, settings, state);
-
   const openOrders: IOpenOrder[] = yield exchange.getOpenOrders({ symbol: marketId });
   const openIds = new Set(openOrders.map((o) => o.exchangeOrderId));
   yield* cancelTrackedOrders(exchange, marketId, state, openIds, () => true);
@@ -503,22 +644,55 @@ function* flattenPosition(
   if (state.direction !== null && state.totalQty > 0) {
     const qty = roundQuantityToStep(state.totalQty, state.stepSize);
     if (qty <= 0) {
-      throw new Error(`alphaGrid: cannot flatten dust position ${state.totalQty} — manual recovery needed.`);
+      logger.warn(`[AlphaGrid] Cannot market-close dust remainder ${state.totalQty} — manual recovery needed.`);
+    } else {
+      yield exchange.placeMarketOrder({
+        symbol: marketId,
+        side: directionToExitSide(state.direction),
+        quantity: qty,
+        reduceOnly: true,
+      });
+      logger.info(`[AlphaGrid] Market-closed ${state.direction} ${qty} (${opts.reason}).`);
     }
-    yield exchange.placeMarketOrder({
-      symbol: marketId,
-      side: directionToExitSide(state.direction),
-      quantity: qty,
-      reduceOnly: true,
-    });
-    logger.info(`[AlphaGrid] Flattened ${state.direction} ${qty} via market (manual stop).`);
   }
 
   state.direction = null;
   state.fills = [];
   state.totalQty = 0;
   state.tpOrderId = null;
+  state.stopOrderId = null;
   state.idleOutOfRange = false;
+
+  logger.warn(`[AlphaGrid] ${opts.reason}`);
+  if (opts.stopBot && control) {
+    yield control.stop();
+  }
+}
+
+/** Exchange stop-hit: position closed by the venue → terminate + stop the bot. */
+function* handleExchangeStopHit(
+  exchange: IExchange,
+  control: IBotControl,
+  marketId: string,
+  state: AlphaGridRuntimeState,
+): StratGen {
+  yield* terminatePosition(exchange, control, marketId, state, {
+    stopBot: true,
+    reason: "Exchange-side stop hit — position closed, bot stopped. (No external alert channel exists upstream; watch the dashboard.)",
+  });
+}
+
+/** Manual stop (framework stop command): reconcile, flatten, keep the bot lifecycle to the framework. */
+function* flattenPosition(
+  exchange: IExchange,
+  control: IBotControl,
+  marketId: string,
+  state: AlphaGridRuntimeState,
+): StratGen {
+  // Reconcile first: a fill may have landed since the last tick (else the close qty is wrong).
+  const stopHit = yield* reconcileOrders(exchange, control, marketId, state);
+  if (stopHit) return; // stop-hit already terminated + stopped.
+  yield* terminatePosition(exchange, null, marketId, state, { stopBot: false, reason: "Flattened (manual stop)." });
 }
 
 function* handleStart(
@@ -546,6 +720,7 @@ function* handleStart(
 
 function* handleTick(
   exchange: IExchange,
+  control: IBotControl,
   marketId: string,
   settings: AlphaGridSettings,
   state: AlphaGridRuntimeState,
@@ -555,7 +730,8 @@ function* handleTick(
     throw new Error(`alphaGrid: invalid mark price ${markPrice} for ${marketId}.`);
   }
 
-  yield* reconcileOrders(exchange, marketId, settings, state);
+  const stopHit = yield* reconcileOrders(exchange, control, marketId, state);
+  if (stopHit) return; // exchange stop-hit already terminated + stopped.
 
   // TP fully executed → close cycle (fresh FLAT grid), nothing else this tick.
   if (state.direction !== null && state.totalQty <= 0) {
@@ -564,6 +740,11 @@ function* handleTick(
   }
 
   yield* syncTakeProfitOrder(exchange, marketId, settings, state);
+  yield* syncStopOrder(exchange, marketId, settings, state);
+
+  const breached = yield* supervisorBlock(exchange, control, marketId, settings, state, markPrice);
+  if (breached) return; // supervisor force-closed + stopped.
+
   yield* maybeTrail(exchange, marketId, settings, state, markPrice);
 
   if (state.direction === null && !state.orders.some((o) => o.kind === "grid")) {
@@ -581,11 +762,11 @@ export function* alphaGridStrategy(ctx: TBotContext<AlphaGridBotConfig>): StratG
   const state = ensureAlphaGridState(ctx.state, marketId);
 
   if (ctx.onStop) {
-    yield* flattenPosition(ctx.exchange, marketId, settings, state);
+    yield* flattenPosition(ctx.exchange, ctx.control, marketId, state);
     return;
   }
   if (ctx.onStart) {
     yield* handleStart(ctx.exchange, marketId, settings, state);
   }
-  yield* handleTick(ctx.exchange, marketId, settings, state);
+  yield* handleTick(ctx.exchange, ctx.control, marketId, settings, state);
 }
