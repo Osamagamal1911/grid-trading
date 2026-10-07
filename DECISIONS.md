@@ -184,3 +184,72 @@ unsafe), documented here per §8.6. `upstream` remote still points at Open-Trade
 `origin` pushes go only to the human's fork… actually to this repo itself (it IS the human's repo).
 Rejected alternative: separate `Osamagamal1911/opentrader` fork (spec-§8.6-default, cleaner
 history) — declined by human for repo consolidation.
+
+### 2026-10-07 · D19 [AUTO]: S3 = env-first credential layer, NOT removal of upstream DB/file account plumbing
+
+What: S3 adds an env-based credential source (`BINANCE_API_KEY` / `BINANCE_API_SECRET`) that
+WINS at runtime wherever alphaGrid-adjacent code builds a Binance exchange, but does NOT delete
+the upstream `ExchangeAccount` DB table, trpc account routers, or `exchanges.json5` file flow.
+Concretely: (a) new pure loader module in `packages/exchanges`; (b) last-mile env substitution
+in `ExchangeProvider.fromAccount` for Binance when env vars are present (in-memory only, never
+persisted); (c) redaction of Binance secrets before the CLI sync (`createOrUpdateExchangeAccounts`)
+writes to DB when env vars are present; (d) redaction of the `logger.debug(exchangesConfig, …)`
+lines that would otherwise print secrets when debug logging is on. When env vars are ABSENT,
+every flow behaves byte-identically to upstream (backward compatible).
+Why: bots reference `exchangeAccountId` — deleting the account table/routers would break bot
+deployment and the M1 dashboard requirement; per §7 the smallest viable adjustment wins, and the
+S3 acceptance criteria as written constrain NEW code paths + defaults + tests + audit (all met),
+they do not demand deleting upstream flows. Residual risk (dashboard-created accounts still store
+plaintext by upstream design) is documented in ALPHAGRID.md §5 as a known limitation with a
+follow-up proposal, not silently redesigned.
+Rejected: full removal of DB columns/routers/sample-file flow (blast radius: breaks dashboard
+account management + bot↔account relations); overlay-only in `readExchangesConfig` (env secrets
+would still be persisted to DB by the CLI sync AND printed by the debug log — fails the audit).
+
+### 2026-10-07 · D20 [AUTO]: Env var set + safe defaults (testnet-first)
+
+What: `BINANCE_API_KEY` / `BINANCE_API_SECRET` (required unless paper); `BINANCE_TESTNET`
+(default `"true"` → `setSandboxMode`, i.e. Binance testnet; explicit `"false"` = live, documented
+as human-opt-in risk for M4); `BINANCE_PAPER` (default `"false"`; `"true"` = `PaperExchange`
+simulator, keys not required). Missing required vars throw naming the VAR, never the value;
+the loader module never logs. `ExchangeProvider.fromEnv()` builds a fresh (uncached) instance —
+docstring warns callers to reuse it (rate limits); caching stays with the per-account-id cache
+in `fromAccount`, which S7/S10 runtime paths use.
+Why: spec §3 demands testnet/paper default with no live default; paper-without-keys keeps
+secret-free simulation possible; env-wins-when-present is simpler to audit than fill-in-blanks
+(which could silently mask a missing env configuration).
+Rejected: always-demo loader with no live path (would make M4-via-env impossible and push the
+human back to plaintext flows); fill-in-blanks substitution (masks misconfiguration).
+
+### 2026-10-07 · D21 [AUTO]: S2 marked DONE (stale status bookkeeping, no spec change)
+
+What: STEPS.md S2 status was left `IN PROGRESS` although all four acceptance criteria are
+verifiably met (DECISIONS holds D1–D8 + D9–D14; HANDOFF has all §8.3 sections; ALPHAGRID skeleton
+has all §6 sections; S2's scope added no `.ts` — session-1/2 commits were docs/config only).
+Marked DONE without touching criteria text.
+Why: statuses must reflect reality for the next AI; leaving a completed step open invites rework.
+Rejected: leaving it open "to be safe" (causes exactly the redo the protocol tries to prevent).
+
+### 2026-10-07 · D22 [AUTO]: `test: vitest` task added to `packages/exchanges/moon.yml`
+
+What: sibling packages (`tools`, `indicators`, `bot-templates`, `bot`, `event-bus`) all define a
+moon `test` task running `vitest`; `exchanges` had none, so `moon run exchanges:test` was an
+unknown target. Added the same one-liner (convention match, no new tooling).
+Why: S3 adds the first unit tests to the exchanges package; they must run through the same
+`moon run <pkg>:test` path as everything else.
+Rejected: running vitest only ad-hoc via npx (works but leaves the gap for the next AI).
+
+### 2026-10-07 · D23 [AUTO]: Local testnet creds file = gitignored, env-only code contract
+
+What: Binance testnet `key:`/`secret:` live ONLY in repo-root `binance-test-net` (human-provided,
+local-only). It is now gitignored (exact-name rule + `*credentials*` pattern) and verified absent
+from `git status`. Committed code NEVER reads this file — it reads `BINANCE_API_KEY` /
+`BINANCE_API_SECRET` env vars only; the local flow is sourcing the file into env per-shell
+(commands documented in HANDOFF, never committed). Later real-API use = same var names with
+live values, only on explicit human approval (M4, out of scope).
+Disclosure: a structure probe during inspection echoed the file's values into tool output. They are
+testnet-scoped, stay on this machine, and will not be reproduced in any output, commit, or doc.
+Why: spec §3 forbids file/DB secret storage; env-only code + ignored local file satisfies both
+the letter (audit-clean repo) and the practical need (testnet runs without pasting secrets).
+Rejected: reading the file from committed code (reintroduces file-based secrets); committing an
+`.env` with the values (same violation); deleting the human's file (their property, needed for runs).

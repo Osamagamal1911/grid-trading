@@ -34,6 +34,9 @@ tsconfig.tsbuildinfo
 
 # --- alphaGrid additions (BUILD_PROMPT.md §8.6: never stage credentials or artifacts) ---
 # Merged with the pre-existing grid-trading .gitignore during the S1 upstream import.
+# Local credential files (exact names ONLY — never broad globs: a *credentials* glob
+# would swallow legit source files like env-credentials.ts). NEVER commit these.
+binance-test-net
 *.key
 *.pem
 *secret*

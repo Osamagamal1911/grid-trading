@@ -18,4 +18,5 @@
 export * from "./exchanges/index.js";
 export * from "./types/index.js";
 export * from "./cache.js";
+export * from "./env-credentials.js";
 export * from "./exchange.provider.js";

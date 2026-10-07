@@ -4,6 +4,90 @@ Protocol: BUILD_PROMPT.md §8. This file is state, not spec — it never overrid
 
 ---
 
+## Session 3 — 2026-10-07 · muse-spark-1.3-free (OpenCode) · S3 env credentials + testnet init/verify
+
+### Completed this session
+
+- S3 DONE (all 4 acceptance criteria). Env-first credential layer:
+  - NEW `packages/exchanges/src/env-credentials.ts` — `loadEnvCredentials` /
+    `hasEnvCredentials` / `parseEnvBool` / `redactSecrets` / `redactExchangesSecrets`
+    (pure, never logs, errors name the VAR never the value).
+  - `ExchangeProvider.fromEnv()` (new) + env-wins substitution in `fromAccount`
+    (in-memory only; added optional `env` param for hermetic tests; absent-env = legacy).
+  - `app/src/utils/bot.ts`: CLI sync stores BLANK Binance secrets when env present.
+  - `app/src/api/exchanges/add.ts` + `update.ts`: same rule for the CLI write path (found via audit).
+  - `app/src/api/run-trading.ts` + `stop-command.ts`: debug logs print the redacted copy.
+  - `packages/exchanges/moon.yml` + `vitest.config.ts` (new): first test task/config for the package.
+  - `.env.example`, `exchanges.sample.json5` (comments only), `ALPHAGRID.md` §5 (security model filled).
+- NEW `packages/exchanges/src/env-credentials.test.ts` — 18 tests green (env load, missing-var
+  errors, testnet/paper defaults, redaction, fromEnv/fromAccount wiring, non-Binance isolation).
+- Test suite: `exchanges:test` 18/18 ✅, `tools:test` 75/75 ✅, `indicators:test` 15/15 ✅;
+  `exchanges` typecheck clean; `app` still exactly the 4 pre-existing baseline errors (zero new).
+- Grep audit (`apiKey|secretKey|BINANCE_API` over `packages/` + `app/src`): only 4 classes —
+  (1) generated prisma zod schemas (field names, no values); (2) pre-existing upstream
+  trpc schemas/db computed field/CCXT passthrough (in-memory only, untouched — D19 limitation);
+  (3) NEW S3 code (env-only reads + redaction); (4) samples = placeholders only.
+  No secret VALUES in committed code. `binance-test-net`, `.env`, `dev.db` gitignored + unstaged.
+- Project initialized per human request: local gitignored `.env` (secrets NOT stored in it —
+  only `BINANCE_TESTNET/PAPER` toggles + source commands) → `prisma:migrate` ✅ (dev.db seeded).
+- Testnet read-only verification (temp test, deleted after): `loadMarkets` ✅ + futures balance
+  via the S3 env path ✅ — keys valid for Binance FUTURES testnet; NO orders placed.
+  Spot-vision balance → -2015 is EXPECTED (futures-testnet keys don't cover spot; irrelevant).
+- D19–D23 appended ([AUTO]); S2 marked DONE (stale status, D21); `.gitignore` covers `binance-test-net` (exact-name rule — a `*credentials*` glob was tried
+  and reverted same session: it swallowed the legit `env-credentials*.ts` source files).
+  Disclosure: a structure probe echoed the testnet key/secret into tool output once (D23) —
+  testnet-scoped, local-only, never reproduced.
+  key/secret into tool output once (D23) — testnet-scoped, local-only, never reproduced.
+
+### Files created / modified (this session)
+
+- Created: `packages/exchanges/src/env-credentials.ts`, `.../env-credentials.test.ts`,
+  `packages/exchanges/vitest.config.ts`, `.env` (gitignored, local only).
+- Modified: `packages/exchanges/src/exchange.provider.ts`, `.../src/index.ts`, `.../moon.yml`,
+  `app/src/utils/bot.ts`, `app/src/api/run-trading.ts`, `app/src/api/stop-command.ts`,
+  `app/src/api/exchanges/add.ts`, `app/src/api/exchanges/update.ts`,
+  `.env.example`, `.gitignore`, `exchanges.sample.json5`,
+  `STEPS.md`, `DECISIONS.md`, `HANDOFF.md`, `ALPHAGRID.md`.
+- NEVER touched: `binance-test-net` content (read-only), existing grid/grid-bot/dca/rsi templates.
+
+### In progress (exact state)
+
+- S3 DONE, about to commit + push (see below). No strategy code yet (correct — S4 is next).
+- Local testnet shell setup for the human/next AI (per shell, values stay local):
+  `export BINANCE_API_KEY="$(sed -n 's/^key: //p' binance-test-net)"` and same for
+  `BINANCE_API_SECRET`. Needs re-export in every new shell (or direnv, human's choice).
+
+### Next steps (concrete, ordered)
+
+1. Commit `alphaGrid: S3 env-based credentials + testnet init/verify`, push `origin/feature/alphaGrid`.
+2. Start S4 (core math module + unit tests, §4.2) — pure, no exchange needed.
+3. Then S5 → S6 → S7 → S8 → tag `alphaGrid-m1` → S9 → tag `alphaGrid-m2` → PR (human approval).
+
+### Blockers / open questions for the human
+
+- None for S4–S9 (all offline/testable without keys). For S10: futures-testnet keys verified
+  for reads; first testnet ORDER will confirm trading permission then — if it fails with -2015,
+  enable futures + IP-whitelist this machine on the testnet portal (or mint fresh futures keys).
+- Residual upstream limitation (D19, also in ALPHAGRID.md §5): dashboard-created accounts still
+  store plaintext by upstream design. Proposal after M2: secret-free dashboard accounts. No action now.
+
+### What the next AI must NOT redo / traps to avoid
+
+- Do NOT re-verify testnet with new scratch files unless keys change — result recorded above.
+- Do NOT "fix" the spot-vision -2015 — expected, out of scope (futures-only strategy).
+- Do NOT add secrets to `.env`/samples/docs — env exports only; check `git status` + staged diff
+  for `binance-test-net`/`.env`/`dev.db` before EVERY commit (all must stay untracked/ignored).
+- `tsc --build packages/exchanges` (or full `tsc --build`) is REQUIRED after changing
+  `packages/*` before `app` typecheck sees new exports (project-reference `/dts` staleness).
+- All Sessions-1/2 traps still apply (no `master` commits, no rebase across import merge,
+  moon serves cached failures — re-verify with direct `tsc`).
+
+### Commit
+
+- `alphaGrid: S3 env-based credentials + testnet init/verify`, then `git push origin feature/alphaGrid`.
+
+---
+
 ## Session 2 — 2026-10-07 · muse-spark-1.3-free (OpenCode) · S1 toolchain + baseline
 
 ### Completed this session

@@ -1,6 +1,7 @@
 import { ExchangeAccountWithCredentials, TBot, xprisma } from "@opentrader/db";
+import { hasEnvCredentials } from "@opentrader/exchanges";
 import { logger } from "@opentrader/logger";
-import { BarSize } from "@opentrader/types";
+import { BarSize, ExchangeCode } from "@opentrader/types";
 import { BotConfig, ExchangeConfig } from "../types.js";
 
 /**
@@ -11,6 +12,20 @@ export async function createOrUpdateExchangeAccounts(exchangesConfig: Record<str
   const exchangeAccounts: ExchangeAccountWithCredentials[] = [];
 
   for (const [exchangeLabel, exchangeData] of Object.entries(exchangesConfig)) {
+    // alphaGrid S3 (D19): when Binance env credentials are present, secrets stay in
+    // env only — the runtime substitutes them in-memory (ExchangeProvider.fromAccount)
+    // and the DB keeps metadata with BLANK secrets. Env-absent behavior unchanged.
+    const useEnvSecrets = exchangeData.exchangeCode === ExchangeCode.BINANCE && hasEnvCredentials();
+    const storableData = useEnvSecrets
+      ? { ...exchangeData, apiKey: "", secretKey: "", password: "" }
+      : exchangeData;
+
+    if (useEnvSecrets) {
+      logger.info(
+        `Exchange account "${exchangeLabel}": Binance secrets provided via environment — storing metadata only, no secrets in DB.`,
+      );
+    }
+
     let exchangeAccount = await xprisma.exchangeAccount.findFirst({
       where: {
         label: exchangeLabel,
@@ -25,7 +40,7 @@ export async function createOrUpdateExchangeAccounts(exchangesConfig: Record<str
           id: exchangeAccount.id,
         },
         data: {
-          ...exchangeData,
+          ...storableData,
           label: exchangeLabel,
           owner: {
             connect: {
@@ -41,7 +56,7 @@ export async function createOrUpdateExchangeAccounts(exchangesConfig: Record<str
 
       exchangeAccount = await xprisma.exchangeAccount.create({
         data: {
-          ...exchangeData,
+          ...storableData,
           label: exchangeLabel,
           owner: {
             connect: {

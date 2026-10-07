@@ -16,9 +16,11 @@
  * Repository URL: https://github.com/bludnic/opentrader
  */
 import type { ExchangeAccountWithCredentials } from "@opentrader/db";
-import type { ExchangeCode } from "@opentrader/types";
+import { ExchangeCode } from "@opentrader/types";
 import { exchanges } from "./exchanges/index.js";
 import type { IExchange } from "./types/index.js";
+import { hasEnvCredentials, loadEnvCredentials } from "./env-credentials.js";
+import type { EnvSource } from "./env-credentials.js";
 
 type ExchangeAccountId = number;
 
@@ -42,7 +44,7 @@ export class ExchangeProvider {
    */
   private demoPublicExchanges: Partial<Record<ExchangeCode, IExchange>> = {};
 
-  fromAccount(exchangeAccount: ExchangeAccountWithCredentials): IExchange {
+  fromAccount(exchangeAccount: ExchangeAccountWithCredentials, env: EnvSource = process.env): IExchange {
     const { id, exchangeCode, credentials } = exchangeAccount;
 
     // Return cached if instance available
@@ -54,14 +56,23 @@ export class ExchangeProvider {
       return cachedExchange;
     }
 
+    // alphaGrid S3 (D19/D20): when Binance env credentials are present they WIN
+    // over stored values. Substitution is in-memory only — secrets are never
+    // persisted. Env-absent behavior is byte-identical to upstream.
+    // The `env` param defaults to process.env; tests inject fakes (hermetic).
+    const effectiveCredentials =
+      exchangeCode === ExchangeCode.BINANCE && hasEnvCredentials(env)
+        ? { ...loadEnvCredentials(env), password: "" }
+        : credentials;
+
     // Create new exchange instance
     const newExchange = exchanges[exchangeCode as ExchangeCode](
       {
-        ...credentials,
-        code: credentials.code as ExchangeCode,
-        password: credentials.password ?? "",
+        ...effectiveCredentials,
+        code: effectiveCredentials.code as ExchangeCode,
+        password: effectiveCredentials.password ?? "",
       },
-      credentials.isDemoAccount,
+      effectiveCredentials.isDemoAccount,
     );
 
     this.privateExchanges[id] = newExchange; // cache it
@@ -71,6 +82,26 @@ export class ExchangeProvider {
     // );
 
     return newExchange;
+  }
+
+  /**
+   * alphaGrid S3 (D19/D20): build a Binance exchange directly from env vars
+   * (`BINANCE_API_KEY` / `BINANCE_API_SECRET`, testnet by default).
+   * Programmatic entry point for alphaGrid runtime, scripts, and S10 testnet runs.
+   * Returns a FRESH instance on every call (no cache) — callers must reuse the
+   * returned instance instead of calling this in a hot path (rate limits).
+   * @throws when required env vars are missing (see `loadEnvCredentials`).
+   */
+  fromEnv(env: EnvSource = process.env): IExchange {
+    const credentials = loadEnvCredentials(env);
+
+    return exchanges[credentials.code](
+      {
+        ...credentials,
+        password: credentials.password ?? "",
+      },
+      credentials.isDemoAccount,
+    );
   }
 
   fromCode(exchangeCode: ExchangeCode, isDemo: boolean) {

@@ -1,5 +1,6 @@
 import { BarSize } from "@opentrader/types";
 import { logger } from "@opentrader/logger";
+import { redactExchangesSecrets } from "@opentrader/exchanges";
 import { findStrategy } from "@opentrader/bot-templates/server";
 import { ExchangeAccountWithCredentials, xprisma } from "@opentrader/db";
 import type { CommandResult } from "../types.js";
@@ -20,7 +21,8 @@ export async function runTrading(strategyName: string, options: Options): Promis
   logger.debug(config, "Parsed bot config");
 
   const exchangesConfig = readExchangesConfig(options.config);
-  logger.debug(exchangesConfig, "Parsed exchanges config");
+  // alphaGrid S3: never print secret VALUES — debug logs get the redacted copy.
+  logger.debug(redactExchangesSecrets(exchangesConfig), "Parsed exchanges config (secrets redacted)");
 
   let strategy: ReturnType<typeof findStrategy>;
   try {

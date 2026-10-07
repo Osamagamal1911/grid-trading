@@ -51,10 +51,24 @@ leverage 1–3, nLevels, atrMultiplier, tpPct, stopLossPct. Conservative default
 
 ## 5. Security model
 
-- Keys from `BINANCE_API_KEY` / `BINANCE_API_SECRET` env vars only; never in DB/files/logs. (S3.)
-- Trading-permission-only API key; withdrawals DISABLED; IP whitelist; sub-account recommended.
+- **Env-only secrets (S3).** Binance credentials load ONLY from `BINANCE_API_KEY` /
+  `BINANCE_API_SECRET`. When set, they win over any stored values via in-memory substitution
+  in `ExchangeProvider.fromAccount` / `fromEnv` (`packages/exchanges/src/env-credentials.ts`);
+  secrets are never written to DB, files, or logs (debug logs print a redacted copy).
+  The CLI sync stores metadata with BLANK secrets when env vars are present.
+- **Testnet/paper default.** `BINANCE_TESTNET=true` (default) → Binance testnet (sandbox mode);
+  `BINANCE_PAPER=true` → local simulator, no keys needed. Live (`BINANCE_TESTNET=false`) is an
+  explicit human opt-in only (M4, out of scope for automated sessions).
+- **Key hygiene.** Trading-permission-only API key; withdrawals DISABLED; IP whitelist;
+  sub-account recommended. Local testnet values live in the gitignored `binance-test-net` file
+  (never committed); per-shell export commands are in `.env.example`.
 - Testnet/paper is the default; live requires explicit human approval. (S10/M4 out of scope.)
 - Every closing order is `reduceOnly`; one-way position mode; isolated margin recommended.
+- **Known upstream limitation (not silently redesigned).** Dashboard-created exchange accounts
+  still store plaintext secrets by upstream design (`ExchangeAccount` table, trpc account routers).
+  For alphaGrid, prefer env-based/testnet accounts. Follow-up proposal: migrate dashboard account
+  creation to secret-free (reference-by-env) storage — tracked for after M2, requires human approval
+  (touches schema + routers + UI).
 
 ## 6. Feature toggles and their risks
 

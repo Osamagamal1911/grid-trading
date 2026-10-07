@@ -43,7 +43,7 @@ Acceptance criteria:
 - [ ] ALPHAGRID.md skeleton exists with the §6-mandated sections (even if TBD).
 - [ ] No `.ts` strategy code added or changed in this step.
 
-Status: IN PROGRESS (this session).
+Status: DONE (criteria verifiably met; status corrected from stale IN PROGRESS — see DECISIONS.md D21).
 
 ## S3 — Safe credentials (env-based keys, M1)
 
@@ -60,7 +60,12 @@ Acceptance criteria:
 - [ ] Default exchange configuration is testnet/paper; no live-trading path is the default.
 - [ ] Existing test suite still green; new unit test covers env-loading (incl. missing-var error).
 
-Status: TODO.
+Status: DONE (env loader `packages/exchanges/src/env-credentials.ts` + 18 unit tests green;
+`ExchangeProvider.fromEnv()` + env-wins substitution in `fromAccount` (in-memory only);
+CLI sync + `exchanges add/update` store BLANK secrets when env present; debug logs redacted;
+defaults testnet/paper; testnet read-only verified (futures balance via env path ✅);
+grep audit recorded in HANDOFF; app typecheck still exactly the 4 pre-existing errors —
+see DECISIONS.md D19/D20/D23).
 
 ## S4 — Core math module + unit tests (M1, §4.2)
 
@@ -198,3 +203,8 @@ Status: TODO (out of scope for build sessions; human runs it).
   `packages/*` (incl. `db` — earlier `order.entity` errors were a missing-`/dts` cascade);
   `app:typecheck` 4 pre-existing errors (out of scope); `tools:test` 75/75, `indicators:test`
   15/15, `bot-templates:test` no files (expected). Full detail: DECISIONS.md D18.
+- 2026-10-07: S2 DONE + S3 DONE (session 3, muse-spark). S3: env-first credential layer
+  (D19–D20, D23); `exchanges:test` 18/18, `tools:test` 75/75, `indicators:test` 15/15;
+  `exchanges` typecheck clean; `app` still exactly the 4 pre-existing errors. Project initialized:
+  local `.env` (gitignored) + `prisma:migrate` ✅ (dev.db seeded). Testnet read-only verified:
+  futures balance via S3 env path ✅ (spot-vision -2015 expected — futures-testnet keys).

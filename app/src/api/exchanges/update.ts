@@ -1,4 +1,5 @@
 import { ExchangeCode } from "@opentrader/types";
+import { hasEnvCredentials } from "@opentrader/exchanges";
 import { logger } from "@opentrader/logger";
 import type { CommandResult } from "../../types.js";
 import { createDaemonRpcClient } from "../../daemon-rpc.js";
@@ -40,14 +41,20 @@ export async function updateExchangeAccount(options: Options): Promise<CommandRe
     };
   }
 
+  // alphaGrid S3 (D19): env wins — never persist CLI-passed Binance secrets when env vars exist.
+  const useEnvSecrets = options.code === ExchangeCode.BINANCE && hasEnvCredentials();
+  if (useEnvSecrets) {
+    logger.info("Binance secrets provided via environment — storing metadata only, no secrets in DB.");
+  }
+
   await daemonRpc.exchangeAccount.update.mutate({
     id: exchangeAccount.id,
     body: {
       name: options.name || exchangeAccount.name,
       exchangeCode: options.code,
-      apiKey: options.key,
-      secretKey: options.secret,
-      password: options.password,
+      apiKey: useEnvSecrets ? "" : options.key,
+      secretKey: useEnvSecrets ? "" : options.secret,
+      password: useEnvSecrets ? "" : options.password,
       isDemoAccount: options.demo,
       isPaperAccount: options.paper,
     },

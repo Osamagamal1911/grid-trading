@@ -1,4 +1,8 @@
 {
+  // alphaGrid S3: values below are PLACEHOLDERS only. For BINANCE entries,
+  // BINANCE_API_KEY / BINANCE_API_SECRET env vars take precedence at runtime
+  // (in-memory substitution; secrets are never persisted to DB — see ALPHAGRID.md §5).
+  // Prefer testnet (BINANCE_TESTNET=true, the default) over live keys.
   DEFAULT: {
     name: "OKX Live",
     apiKey: "exchange_api_key",

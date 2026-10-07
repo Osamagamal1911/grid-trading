@@ -1,5 +1,6 @@
 import { findStrategy } from "@opentrader/bot-templates/server";
 import { xprisma } from "@opentrader/db";
+import { redactExchangesSecrets } from "@opentrader/exchanges";
 import { logger } from "@opentrader/logger";
 import type { CommandResult } from "../types.js";
 import { readBotConfig, readExchangesConfig } from "../config.js";
@@ -12,7 +13,8 @@ export async function stopCommand(options: { config: string }): Promise<CommandR
   logger.debug(config, "Parsed bot config");
 
   const exchangesConfig = readExchangesConfig(options.config);
-  logger.debug(exchangesConfig, "Parsed exchanges config");
+  // alphaGrid S3: never print secret VALUES — debug logs get the redacted copy.
+  logger.debug(redactExchangesSecrets(exchangesConfig), "Parsed exchanges config (secrets redacted)");
 
   const botLabel = config.label || "default";
 
